@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.lihaoyi.com)",
+      "WebFetch(domain:viethung.space)",
+      "WebFetch(domain:ploum.net)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:www.pavpanchekha.com)",
+      "WebFetch(domain:limpet.net)",
+      "WebFetch(domain:blog.quastor.org)",
+      "WebFetch(domain:taligarsiel.com)",
+      "WebFetch(domain:marvinh.dev)",
+      "Bash(swift:*)",
+      "WebFetch(domain:browser.engineering)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:journal.stuffwithstuff.com)",
+      "WebFetch(domain:rderik.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
