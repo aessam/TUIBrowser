@@ -37,6 +37,9 @@ public struct InlineLayout: Sendable {
             if child.boxType == .text {
                 // Text nodes stay as-is
                 result.append(child)
+            } else if child.boxType == .inlineBlock {
+                // Inline-block is atomic - don't flatten, treat as single unit
+                result.append(child)
             } else if child.isInline {
                 // Inline boxes: include box start, flatten children, include box end
                 if child.children.isEmpty {
@@ -129,6 +132,7 @@ public struct InlineLayout: Sendable {
             } else {
                 // Atomic inline box
                 let boxWidth = calculateInlineWidth(box)
+                let boxHeight = calculateInlineHeight(box)
 
                 if currentLine.width + boxWidth > maxWidth && currentLine.width > 0 {
                     lines.append(currentLine)
@@ -136,9 +140,10 @@ public struct InlineLayout: Sendable {
                 }
 
                 box.dimensions.setContentWidth(boxWidth)
-                box.dimensions.setContentHeight(1)
+                box.dimensions.setContentHeight(boxHeight)
                 currentLine.boxes.append(box)
                 currentLine.width += boxWidth
+                currentLine.height = max(currentLine.height, boxHeight)
             }
         }
 
@@ -186,12 +191,101 @@ public struct InlineLayout: Sendable {
         if let text = box.textContent {
             return text.count
         }
-        // For other inline elements, sum children widths
+
+        // Check for special elements with intrinsic sizes
+        if let element = box.element {
+            switch element.tagName {
+            case "input":
+                let inputType = element.getAttribute("type")?.lowercased() ?? "text"
+                switch inputType {
+                case "checkbox", "radio":
+                    return 1  // Single character
+                case "submit", "button", "reset":
+                    let value = element.getAttribute("value") ?? inputType.capitalized
+                    return value.count + 4  // "┃ text ┃"
+                case "hidden":
+                    return 0
+                default:
+                    // Text inputs - use size attribute or default 20
+                    let size = Int(element.getAttribute("size") ?? "20") ?? 20
+                    return min(size + 2, 42)  // +2 for borders
+                }
+            case "button":
+                let text = element.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                return max(text.count + 4, 8)  // Minimum 8 chars
+            case "select":
+                return 15  // Default dropdown width
+            case "textarea":
+                let cols = Int(element.getAttribute("cols") ?? "40") ?? 40
+                return cols + 2  // +2 for borders
+            case "img":
+                // Use width attribute or default
+                let width = Int(element.getAttribute("width") ?? "20") ?? 20
+                return min(width, 60)
+            case "br":
+                return 0  // Line break has no width
+            default:
+                break
+            }
+        }
+
+        // For other inline elements, sum children widths (only inline children)
         var width = box.style.padding.horizontal
         for child in box.children {
+            // Skip block children (like <br>) when calculating inline width
+            if child.isBlock && child.element?.tagName != "br" {
+                continue
+            }
             width += calculateInlineWidth(child)
         }
-        return width
+
+        // Ensure minimum width for elements with content
+        if width == 0 && !box.children.isEmpty {
+            // Estimate based on text content
+            var textWidth = 0
+            box.traverse { descendant in
+                if let text = descendant.textContent {
+                    textWidth += text.count
+                }
+            }
+            width = max(width, textWidth + box.style.padding.horizontal)
+        }
+
+        return max(width, 0)
+    }
+
+    /// Calculate height of an inline box
+    private func calculateInlineHeight(_ box: LayoutBox) -> Int {
+        // Check for special elements with intrinsic heights
+        if let element = box.element {
+            switch element.tagName {
+            case "input":
+                let inputType = element.getAttribute("type")?.lowercased() ?? "text"
+                switch inputType {
+                case "checkbox", "radio", "hidden":
+                    return 1
+                case "submit", "button", "reset":
+                    return 3  // Button with borders
+                default:
+                    return 3  // Text input with borders
+                }
+            case "button":
+                return 3  // Button with borders
+            case "select":
+                return 3  // Dropdown with borders
+            case "textarea":
+                let rows = Int(element.getAttribute("rows") ?? "4") ?? 4
+                return rows + 2  // +2 for borders
+            case "img":
+                let height = Int(element.getAttribute("height") ?? "10") ?? 10
+                return min(height / 2, 20)  // Divide by 2 for terminal chars
+            case "br":
+                return 1
+            default:
+                break
+            }
+        }
+        return 1  // Default single line height
     }
 
     // MARK: - Line Positioning

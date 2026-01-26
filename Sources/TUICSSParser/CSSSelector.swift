@@ -1,6 +1,61 @@
 // TUICSSParser - CSS Selector Types
 
-/// Represents a simple selector component (tag, class, id)
+/// Attribute selector match type
+public enum AttributeMatchType: Equatable, Hashable, Sendable {
+    /// [attr] - has attribute
+    case exists
+    /// [attr=value] - exact match
+    case exact
+    /// [attr^=value] - starts with
+    case prefix
+    /// [attr$=value] - ends with
+    case suffix
+    /// [attr*=value] - contains
+    case contains
+    /// [attr~=value] - word match (space-separated)
+    case word
+    /// [attr|=value] - starts with or exactly equals (for lang attributes)
+    case hyphen
+}
+
+/// Attribute selector
+public struct AttributeSelector: Equatable, Hashable, Sendable {
+    public var name: String
+    public var matchType: AttributeMatchType
+    public var value: String?
+    public var caseSensitive: Bool
+
+    public init(name: String, matchType: AttributeMatchType = .exists, value: String? = nil, caseSensitive: Bool = true) {
+        self.name = name
+        self.matchType = matchType
+        self.value = value
+        self.caseSensitive = caseSensitive
+    }
+}
+
+/// Pseudo-class selector
+public enum PseudoClass: Equatable, Hashable, Sendable {
+    case firstChild
+    case lastChild
+    case nthChild(Int) // simplified: just the n value
+    case nthLastChild(Int)
+    case onlyChild
+    case firstOfType
+    case lastOfType
+    case empty
+    case not(SimpleSelector)
+    case hover
+    case focus
+    case active
+    case visited
+    case link
+    case enabled
+    case disabled
+    case checked
+    case root
+}
+
+/// Represents a simple selector component (tag, class, id, attributes, pseudo-classes)
 public struct SimpleSelector: Equatable, Hashable, Sendable {
     /// The tag name (e.g., "div", "p", "*" for universal)
     public var tagName: String?
@@ -11,10 +66,24 @@ public struct SimpleSelector: Equatable, Hashable, Sendable {
     /// The classes (without the . prefix)
     public var classes: [String]
 
-    public init(tagName: String? = nil, id: String? = nil, classes: [String] = []) {
+    /// Attribute selectors
+    public var attributes: [AttributeSelector]
+
+    /// Pseudo-classes
+    public var pseudoClasses: [PseudoClass]
+
+    public init(
+        tagName: String? = nil,
+        id: String? = nil,
+        classes: [String] = [],
+        attributes: [AttributeSelector] = [],
+        pseudoClasses: [PseudoClass] = []
+    ) {
         self.tagName = tagName
         self.id = id
         self.classes = classes
+        self.attributes = attributes
+        self.pseudoClasses = pseudoClasses
     }
 
     /// Calculate the specificity of this simple selector
@@ -28,6 +97,8 @@ public struct SimpleSelector: Equatable, Hashable, Sendable {
         }
 
         b += classes.count
+        b += attributes.count
+        b += pseudoClasses.count
 
         if let tag = tagName, tag != "*" {
             c += 1
@@ -38,7 +109,7 @@ public struct SimpleSelector: Equatable, Hashable, Sendable {
 
     /// Check if this selector matches nothing specific
     public var isEmpty: Bool {
-        tagName == nil && id == nil && classes.isEmpty
+        tagName == nil && id == nil && classes.isEmpty && attributes.isEmpty && pseudoClasses.isEmpty
     }
 }
 

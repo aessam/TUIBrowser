@@ -8,14 +8,27 @@ import TUILayout
 import TUIStyle
 import TUIHTMLParser
 
+/// Image cache protocol for providing decoded images
+public protocol ImageCacheProtocol: Sendable {
+    func get(_ url: String) -> PixelBuffer?
+}
+
 /// Main renderer that converts a layout tree to canvas output
 public struct Renderer: Sendable {
     private let textRenderer: TextRenderer
     private let boxRenderer: BoxRenderer
 
-    public init() {
+    /// Image cache for fetched images
+    private let imageCache: (any ImageCacheProtocol)?
+
+    /// Image render options
+    public var imageOptions: ImageRenderOptions
+
+    public init(imageCache: (any ImageCacheProtocol)? = nil, imageOptions: ImageRenderOptions = .init()) {
         self.textRenderer = TextRenderer()
         self.boxRenderer = BoxRenderer()
+        self.imageCache = imageCache
+        self.imageOptions = imageOptions
     }
 
     // MARK: - Main Render API
@@ -147,16 +160,29 @@ public struct Renderer: Sendable {
             break
 
         case "img":
-            // Image placeholder
-            let alt = element.getAttribute("alt") ?? "[IMG]"
-            if renderY >= 0 && renderY < canvas.height {
-                let style = TextStyle(foreground: .gray)
-                textRenderer.renderText(
-                    "[\(alt)]",
+            // Try to render actual image from cache
+            if let src = element.getAttribute("src"),
+               let cache = imageCache,
+               let pixelBuffer = cache.get(src) {
+                renderImage(
+                    pixelBuffer,
                     at: Point(x: content.x, y: renderY),
-                    style: style,
+                    maxWidth: content.width,
+                    maxHeight: max(1, content.height),
                     to: canvas
                 )
+            } else {
+                // Fall back to placeholder
+                let alt = element.getAttribute("alt") ?? "[IMG]"
+                if renderY >= 0 && renderY < canvas.height {
+                    let style = TextStyle(foreground: .gray)
+                    textRenderer.renderText(
+                        "[\(alt)]",
+                        at: Point(x: content.x, y: renderY),
+                        style: style,
+                        to: canvas
+                    )
+                }
             }
 
         case "a":
@@ -164,39 +190,20 @@ public struct Renderer: Sendable {
             break
 
         case "input":
-            // Form input placeholder
-            let inputType = element.getAttribute("type") ?? "text"
-            let placeholder = element.getAttribute("placeholder") ?? ""
-            if renderY >= 0 && renderY < canvas.height {
-                let style = TextStyle(
-                    foreground: .gray,
-                    background: Color(r: 30, g: 30, b: 30)
-                )
-                let display = placeholder.isEmpty ? "[\(inputType)]" : "[\(placeholder)]"
-                textRenderer.renderText(
-                    display,
-                    at: Point(x: content.x, y: renderY),
-                    style: style,
-                    to: canvas
-                )
-            }
+            renderInput(element, at: Point(x: content.x, y: renderY), width: content.width, to: canvas)
 
         case "button":
-            // Button with border
-            if renderY >= 0 && renderY < canvas.height {
-                let buttonText = element.textContent
-                let style = TextStyle(
-                    bold: true,
-                    foreground: .white,
-                    background: Color(r: 60, g: 60, b: 60)
-                )
-                textRenderer.renderText(
-                    "[ \(buttonText) ]",
-                    at: Point(x: content.x, y: renderY),
-                    style: style,
-                    to: canvas
-                )
-            }
+            renderButton(element, at: Point(x: content.x, y: renderY), to: canvas)
+
+        case "select":
+            renderSelect(element, at: Point(x: content.x, y: renderY), width: content.width, to: canvas)
+
+        case "textarea":
+            renderTextarea(element, at: Point(x: content.x, y: renderY), width: content.width, height: content.height, to: canvas)
+
+        case "label":
+            // Labels are handled by their text content
+            break
 
         case "blockquote":
             // Blockquote with left bar
@@ -213,6 +220,417 @@ public struct Renderer: Sendable {
 
         default:
             break
+        }
+    }
+
+    // MARK: - Image Rendering
+
+    /// Render an image to the canvas using terminal graphics
+    private func renderImage(
+        _ pixels: PixelBuffer,
+        at position: Point,
+        maxWidth: Int,
+        maxHeight: Int,
+        to canvas: Canvas
+    ) {
+        // Skip if position is outside canvas
+        guard position.y >= 0 && position.y < canvas.height else { return }
+        guard position.x >= 0 && position.x < canvas.width else { return }
+
+        // Calculate available space
+        let availableWidth = min(maxWidth, canvas.width - position.x)
+        let availableHeight = min(maxHeight, canvas.height - position.y)
+
+        guard availableWidth > 0 && availableHeight > 0 else { return }
+
+        // Scale image to fit available space
+        let scaledPixels = ImageDecoder.scaleToFit(
+            pixels,
+            maxWidth: availableWidth,
+            maxHeight: availableHeight,
+            blitMode: imageOptions.blitMode
+        )
+
+        // Create renderer with options
+        let imageRenderer = ImageRenderer(options: imageOptions)
+
+        // Render using half-block blitter for best quality
+        let blitResult = imageRenderer.renderColorHalfBlock(scaledPixels)
+
+        // Draw blitted cells to canvas
+        for (rowIndex, row) in blitResult.cells.enumerated() {
+            let y = position.y + rowIndex
+            guard y >= 0 && y < canvas.height else { continue }
+
+            for (colIndex, cell) in row.enumerated() {
+                let x = position.x + colIndex
+                guard x >= 0 && x < canvas.width else { continue }
+
+                let textStyle = TextStyle(
+                    foreground: cell.foreground,
+                    background: cell.background
+                )
+                canvas.setCell(x: x, y: y, char: cell.character, style: textStyle)
+            }
+        }
+    }
+
+    // MARK: - Form Element Rendering
+
+    /// Render an input element
+    private func renderInput(_ element: Element, at position: Point, width: Int, to canvas: Canvas) {
+        guard position.y >= 0 && position.y < canvas.height else { return }
+
+        let inputType = element.getAttribute("type")?.lowercased() ?? "text"
+        let value = element.getAttribute("value") ?? ""
+        let placeholder = element.getAttribute("placeholder") ?? ""
+        let checked = element.hasAttribute("checked")
+        let disabled = element.hasAttribute("disabled")
+
+        let fgColor: Color = disabled ? .gray : .white
+        let bgColor = Color(r: 30, g: 30, b: 30)
+
+        switch inputType {
+        case "checkbox":
+            // Render checkbox: ☐ or ☑
+            let checkChar: Character = checked ? "☑" : "☐"
+            let style = TextStyle(foreground: fgColor)
+            canvas.setCell(x: position.x, y: position.y, char: checkChar, style: style)
+
+        case "radio":
+            // Render radio button: ○ or ●
+            let radioChar: Character = checked ? "●" : "○"
+            let style = TextStyle(foreground: fgColor)
+            canvas.setCell(x: position.x, y: position.y, char: radioChar, style: style)
+
+        case "submit", "button", "reset":
+            // Render as button
+            let buttonText = value.isEmpty ? inputType.capitalized : value
+            let style = TextStyle(bold: true, foreground: fgColor, background: Color(r: 50, g: 50, b: 50))
+            let display = "┃ \(buttonText) ┃"
+            textRenderer.renderText(display, at: position, style: style, to: canvas)
+
+        case "hidden":
+            // Don't render hidden inputs
+            break
+
+        default:
+            // Text-like inputs: text, password, email, number, search, etc.
+            renderTextInput(
+                placeholder: placeholder,
+                value: value,
+                inputType: inputType,
+                at: position,
+                width: max(10, min(width, 40)),
+                fgColor: fgColor,
+                bgColor: bgColor,
+                to: canvas
+            )
+        }
+    }
+
+    /// Render a text input field with box border
+    private func renderTextInput(
+        placeholder: String,
+        value: String,
+        inputType: String,
+        at position: Point,
+        width: Int,
+        fgColor: Color,
+        bgColor: Color,
+        to canvas: Canvas
+    ) {
+        guard position.y >= 0 && position.y < canvas.height else { return }
+
+        let fieldWidth = max(10, width)
+        let borderStyle = TextStyle(foreground: Color(r: 80, g: 80, b: 80))
+        let textStyle = TextStyle(foreground: fgColor, background: bgColor)
+        let placeholderStyle = TextStyle(foreground: .gray, background: bgColor)
+
+        // Draw top border: ┌─────┐
+        var topBorder = "┌"
+        topBorder += String(repeating: "─", count: fieldWidth - 2)
+        topBorder += "┐"
+
+        for (i, char) in topBorder.enumerated() {
+            let x = position.x + i
+            guard x >= 0 && x < canvas.width else { continue }
+            canvas.setCell(x: x, y: position.y, char: char, style: borderStyle)
+        }
+
+        // Draw content row: │ text │
+        let contentY = position.y + 1
+        if contentY >= 0 && contentY < canvas.height {
+            // Left border
+            if position.x >= 0 && position.x < canvas.width {
+                canvas.setCell(x: position.x, y: contentY, char: "│", style: borderStyle)
+            }
+
+            // Content area
+            let contentWidth = fieldWidth - 2
+            let displayText: String
+            let useStyle: TextStyle
+
+            if !value.isEmpty {
+                // Show value (masked for password)
+                if inputType == "password" {
+                    displayText = String(repeating: "•", count: min(value.count, contentWidth))
+                } else {
+                    displayText = String(value.prefix(contentWidth))
+                }
+                useStyle = textStyle
+            } else if !placeholder.isEmpty {
+                displayText = String(placeholder.prefix(contentWidth))
+                useStyle = placeholderStyle
+            } else {
+                displayText = ""
+                useStyle = textStyle
+            }
+
+            // Draw content background and text
+            for i in 0..<contentWidth {
+                let x = position.x + 1 + i
+                guard x >= 0 && x < canvas.width else { continue }
+                let char: Character = i < displayText.count ? Array(displayText)[i] : " "
+                canvas.setCell(x: x, y: contentY, char: char, style: useStyle)
+            }
+
+            // Right border
+            let rightX = position.x + fieldWidth - 1
+            if rightX >= 0 && rightX < canvas.width {
+                canvas.setCell(x: rightX, y: contentY, char: "│", style: borderStyle)
+            }
+        }
+
+        // Draw bottom border: └─────┘
+        let bottomY = position.y + 2
+        if bottomY >= 0 && bottomY < canvas.height {
+            var bottomBorder = "└"
+            bottomBorder += String(repeating: "─", count: fieldWidth - 2)
+            bottomBorder += "┘"
+
+            for (i, char) in bottomBorder.enumerated() {
+                let x = position.x + i
+                guard x >= 0 && x < canvas.width else { continue }
+                canvas.setCell(x: x, y: bottomY, char: char, style: borderStyle)
+            }
+        }
+    }
+
+    /// Render a button element with bold border
+    private func renderButton(_ element: Element, at position: Point, to canvas: Canvas) {
+        guard position.y >= 0 && position.y < canvas.height else { return }
+
+        let buttonText = element.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = buttonText.isEmpty ? "Button" : buttonText
+        let disabled = element.hasAttribute("disabled")
+
+        let fgColor: Color = disabled ? .gray : .white
+        let bgColor = Color(r: 50, g: 50, b: 60)
+        let borderColor = Color(r: 100, g: 100, b: 120)
+
+        let contentWidth = text.count + 2  // padding on each side
+        let buttonWidth = contentWidth + 2  // borders
+
+        let borderStyle = TextStyle(foreground: borderColor)
+        let textStyle = TextStyle(bold: true, foreground: fgColor, background: bgColor)
+
+        // Draw top border: ┏━━━━━┓
+        var topBorder = "┏"
+        topBorder += String(repeating: "━", count: contentWidth)
+        topBorder += "┓"
+
+        for (i, char) in topBorder.enumerated() {
+            let x = position.x + i
+            guard x >= 0 && x < canvas.width else { continue }
+            canvas.setCell(x: x, y: position.y, char: char, style: borderStyle)
+        }
+
+        // Draw content row: ┃ text ┃
+        let contentY = position.y + 1
+        if contentY >= 0 && contentY < canvas.height {
+            if position.x >= 0 && position.x < canvas.width {
+                canvas.setCell(x: position.x, y: contentY, char: "┃", style: borderStyle)
+            }
+
+            // Draw text with background
+            let paddedText = " \(text) "
+            for (i, char) in paddedText.enumerated() {
+                let x = position.x + 1 + i
+                guard x >= 0 && x < canvas.width else { continue }
+                canvas.setCell(x: x, y: contentY, char: char, style: textStyle)
+            }
+
+            let rightX = position.x + buttonWidth - 1
+            if rightX >= 0 && rightX < canvas.width {
+                canvas.setCell(x: rightX, y: contentY, char: "┃", style: borderStyle)
+            }
+        }
+
+        // Draw bottom border: ┗━━━━━┛
+        let bottomY = position.y + 2
+        if bottomY >= 0 && bottomY < canvas.height {
+            var bottomBorder = "┗"
+            bottomBorder += String(repeating: "━", count: contentWidth)
+            bottomBorder += "┛"
+
+            for (i, char) in bottomBorder.enumerated() {
+                let x = position.x + i
+                guard x >= 0 && x < canvas.width else { continue }
+                canvas.setCell(x: x, y: bottomY, char: char, style: borderStyle)
+            }
+        }
+    }
+
+    /// Render a select dropdown
+    private func renderSelect(_ element: Element, at position: Point, width: Int, to canvas: Canvas) {
+        guard position.y >= 0 && position.y < canvas.height else { return }
+
+        // Find selected option
+        var selectedText = ""
+        let options = element.children.filter { $0.tagName == "option" }
+        for option in options {
+            if option.hasAttribute("selected") {
+                selectedText = option.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+        if selectedText.isEmpty && !options.isEmpty {
+            selectedText = options[0].textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let fieldWidth = max(10, min(width, 30))
+        let borderStyle = TextStyle(foreground: Color(r: 80, g: 80, b: 80))
+        let textStyle = TextStyle(foreground: .white, background: Color(r: 30, g: 30, b: 30))
+        let arrowStyle = TextStyle(foreground: .cyan)
+
+        // Draw border and content similar to text input
+        // Top border
+        var topBorder = "┌"
+        topBorder += String(repeating: "─", count: fieldWidth - 2)
+        topBorder += "┐"
+
+        for (i, char) in topBorder.enumerated() {
+            let x = position.x + i
+            guard x >= 0 && x < canvas.width else { continue }
+            canvas.setCell(x: x, y: position.y, char: char, style: borderStyle)
+        }
+
+        // Content row with dropdown arrow
+        let contentY = position.y + 1
+        if contentY >= 0 && contentY < canvas.height {
+            if position.x >= 0 && position.x < canvas.width {
+                canvas.setCell(x: position.x, y: contentY, char: "│", style: borderStyle)
+            }
+
+            // Content (leave 2 chars for arrow)
+            let contentWidth = fieldWidth - 4
+            let displayText = String(selectedText.prefix(contentWidth))
+            let paddedText = displayText.padding(toLength: contentWidth, withPad: " ", startingAt: 0)
+
+            for (i, char) in paddedText.enumerated() {
+                let x = position.x + 1 + i
+                guard x >= 0 && x < canvas.width else { continue }
+                canvas.setCell(x: x, y: contentY, char: char, style: textStyle)
+            }
+
+            // Dropdown arrow
+            let arrowX = position.x + fieldWidth - 3
+            if arrowX >= 0 && arrowX < canvas.width {
+                canvas.setCell(x: arrowX, y: contentY, char: " ", style: textStyle)
+            }
+            if arrowX + 1 >= 0 && arrowX + 1 < canvas.width {
+                canvas.setCell(x: arrowX + 1, y: contentY, char: "▼", style: arrowStyle)
+            }
+
+            let rightX = position.x + fieldWidth - 1
+            if rightX >= 0 && rightX < canvas.width {
+                canvas.setCell(x: rightX, y: contentY, char: "│", style: borderStyle)
+            }
+        }
+
+        // Bottom border
+        let bottomY = position.y + 2
+        if bottomY >= 0 && bottomY < canvas.height {
+            var bottomBorder = "└"
+            bottomBorder += String(repeating: "─", count: fieldWidth - 2)
+            bottomBorder += "┘"
+
+            for (i, char) in bottomBorder.enumerated() {
+                let x = position.x + i
+                guard x >= 0 && x < canvas.width else { continue }
+                canvas.setCell(x: x, y: bottomY, char: char, style: borderStyle)
+            }
+        }
+    }
+
+    /// Render a textarea element
+    private func renderTextarea(_ element: Element, at position: Point, width: Int, height: Int, to canvas: Canvas) {
+        guard position.y >= 0 && position.y < canvas.height else { return }
+
+        let text = element.textContent
+        let placeholder = element.getAttribute("placeholder") ?? ""
+
+        let fieldWidth = max(10, min(width, 60))
+        let fieldHeight = max(3, min(height, 10))
+
+        let borderStyle = TextStyle(foreground: Color(r: 80, g: 80, b: 80))
+        let textStyle = TextStyle(foreground: .white, background: Color(r: 30, g: 30, b: 30))
+        let placeholderStyle = TextStyle(foreground: .gray, background: Color(r: 30, g: 30, b: 30))
+
+        // Top border
+        var topBorder = "┌"
+        topBorder += String(repeating: "─", count: fieldWidth - 2)
+        topBorder += "┐"
+
+        for (i, char) in topBorder.enumerated() {
+            let x = position.x + i
+            guard x >= 0 && x < canvas.width else { continue }
+            canvas.setCell(x: x, y: position.y, char: char, style: borderStyle)
+        }
+
+        // Content rows
+        let displayText = text.isEmpty ? placeholder : text
+        let useStyle = text.isEmpty ? placeholderStyle : textStyle
+        let lines = displayText.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        for row in 0..<(fieldHeight - 2) {
+            let contentY = position.y + 1 + row
+            guard contentY >= 0 && contentY < canvas.height else { continue }
+
+            // Left border
+            if position.x >= 0 && position.x < canvas.width {
+                canvas.setCell(x: position.x, y: contentY, char: "│", style: borderStyle)
+            }
+
+            // Content
+            let lineText = row < lines.count ? String(lines[row].prefix(fieldWidth - 2)) : ""
+            for i in 0..<(fieldWidth - 2) {
+                let x = position.x + 1 + i
+                guard x >= 0 && x < canvas.width else { continue }
+                let char: Character = i < lineText.count ? Array(lineText)[i] : " "
+                canvas.setCell(x: x, y: contentY, char: char, style: useStyle)
+            }
+
+            // Right border
+            let rightX = position.x + fieldWidth - 1
+            if rightX >= 0 && rightX < canvas.width {
+                canvas.setCell(x: rightX, y: contentY, char: "│", style: borderStyle)
+            }
+        }
+
+        // Bottom border
+        let bottomY = position.y + fieldHeight - 1
+        if bottomY >= 0 && bottomY < canvas.height {
+            var bottomBorder = "└"
+            bottomBorder += String(repeating: "─", count: fieldWidth - 2)
+            bottomBorder += "┘"
+
+            for (i, char) in bottomBorder.enumerated() {
+                let x = position.x + i
+                guard x >= 0 && x < canvas.width else { continue }
+                canvas.setCell(x: x, y: bottomY, char: char, style: borderStyle)
+            }
         }
     }
 

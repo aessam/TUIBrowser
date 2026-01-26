@@ -39,7 +39,7 @@ public struct BrowserConfig: Sendable {
     public init(
         userAgent: String = Browser.userAgent,
         loadStylesheets: Bool = true,
-        showImages: Bool = false,
+        showImages: Bool = true,
         enableJavaScript: Bool = false,
         timeout: Double = 30.0,
         maxRedirects: Int = 10
@@ -61,6 +61,51 @@ public struct BrowserConfig: Sendable {
 public enum InputMode {
     case normal      // Normal browsing mode
     case urlInput    // Typing a URL
+}
+
+// MARK: - Image Cache
+
+/// Cache for decoded images
+public final class ImageCache: @unchecked Sendable, ImageCacheProtocol {
+    private var cache: [String: PixelBuffer] = [:]
+    private let lock = NSLock()
+
+    public init() {}
+
+    /// Get cached image for URL
+    public func get(_ url: String) -> PixelBuffer? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[url]
+    }
+
+    /// Store decoded image for URL
+    public func set(_ url: String, image: PixelBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache[url] = image
+    }
+
+    /// Check if URL is cached
+    public func contains(_ url: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[url] != nil
+    }
+
+    /// Clear the cache
+    public func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        cache.removeAll()
+    }
+
+    /// Number of cached images
+    public var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache.count
+    }
 }
 
 // MARK: - Browser State
@@ -132,6 +177,9 @@ public final class Browser {
     /// HTTP client
     private let httpClient: HTTPClient
 
+    /// Image cache for decoded images
+    public let imageCache: ImageCache
+
     /// Terminal canvas
     private var canvas: Canvas?
 
@@ -144,6 +192,7 @@ public final class Browser {
     public init(config: BrowserConfig = .default) {
         self.config = config
         self.state = BrowserState()
+        self.imageCache = ImageCache()
         self.httpClient = HTTPClient(
             timeout: config.timeout,
             maxRedirects: config.maxRedirects,
@@ -236,6 +285,113 @@ public final class Browser {
         }
         state.history.append(url)
         state.historyIndex = state.history.count - 1
+
+        // Fetch images if enabled
+        if config.showImages {
+            await fetchImages(from: document, baseURL: url)
+        }
+    }
+
+    // MARK: - Image Fetching
+
+    /// Fetch and decode images from the document
+    private func fetchImages(from document: Document, baseURL: TUIURL.URL) async {
+        let imgElements = document.getElementsByTagName("img")
+
+        for img in imgElements {
+            guard let src = img.getAttribute("src"), !src.isEmpty else {
+                continue
+            }
+
+            // Resolve relative URL
+            let absoluteURL = resolveImageURL(src, baseURL: baseURL)
+            guard let imageURLString = absoluteURL else {
+                continue
+            }
+
+            // Skip if already cached
+            if imageCache.contains(imageURLString) {
+                continue
+            }
+
+            // Parse URL
+            guard case .success(let imageURL) = URLParser.parse(imageURLString) else {
+                continue
+            }
+
+            // Skip non-http(s) URLs
+            guard imageURL.scheme == "http" || imageURL.scheme == "https" else {
+                continue
+            }
+
+            do {
+                // Fetch image data
+                let response = try await httpClient.fetchWithURLSession(url: imageURL)
+
+                // Check for success
+                guard response.statusCode >= 200 && response.statusCode < 300 else {
+                    continue
+                }
+
+                let imageData = response.body
+                guard !imageData.isEmpty else {
+                    continue
+                }
+
+                // Decode image
+                let decoder = ImageDecoder()
+                if let pixelBuffer = decoder.decode(imageData) {
+                    imageCache.set(imageURLString, image: pixelBuffer)
+                }
+            } catch {
+                // Silently skip failed image loads
+                continue
+            }
+        }
+    }
+
+    /// Resolve image URL relative to base URL
+    private func resolveImageURL(_ src: String, baseURL: TUIURL.URL) -> String? {
+        // Handle data URLs (skip them)
+        if src.hasPrefix("data:") {
+            return nil
+        }
+
+        // Handle absolute URLs
+        if src.hasPrefix("http://") || src.hasPrefix("https://") {
+            return src
+        }
+
+        // Handle protocol-relative URLs
+        if src.hasPrefix("//") {
+            return "\(baseURL.scheme):\(src)"
+        }
+
+        // Handle absolute paths
+        if src.hasPrefix("/") {
+            var port = ""
+            if let p = baseURL.port {
+                port = ":\(p)"
+            }
+            return "\(baseURL.scheme)://\(baseURL.host ?? "")\(port)\(src)"
+        }
+
+        // Handle relative paths
+        var basePath = baseURL.path
+        if !basePath.hasSuffix("/") {
+            basePath = (basePath as NSString).deletingLastPathComponent
+        }
+        if basePath.isEmpty {
+            basePath = "/"
+        }
+        var port = ""
+        if let p = baseURL.port {
+            port = ":\(p)"
+        }
+
+        // Normalize path
+        let fullPath = basePath.hasSuffix("/") ? "\(basePath)\(src)" : "\(basePath)/\(src)"
+        return "\(baseURL.scheme)://\(baseURL.host ?? "")\(port)\(fullPath)"
     }
 
     /// Go back in history
@@ -308,7 +464,13 @@ public final class Browser {
         let canvas = Canvas(width: width, height: height)
 
         if let layout = state.layout {
-            let renderer = Renderer()
+            // Create renderer with image cache if images are enabled
+            let renderer: Renderer
+            if config.showImages {
+                renderer = Renderer(imageCache: imageCache)
+            } else {
+                renderer = Renderer()
+            }
             renderer.render(layout: layout, to: canvas, scrollY: state.scrollY)
         } else {
             // Render welcome/error screen
@@ -389,9 +551,20 @@ public final class Browser {
         do {
             try rawMode.enable()
         } catch {
-            print("Error: Could not enable raw mode - \(error)")
-            print("Running in non-interactive mode...")
-            printStaticOutput()
+            // Non-interactive mode: still load and display the page
+            if let url = initialURL {
+                print("Loading \(url)...")
+                do {
+                    try await navigate(to: url)
+                    printStaticOutput()
+                } catch {
+                    print("Error loading page: \(error)")
+                }
+            } else {
+                print("TUIBrowser \(Browser.version)")
+                print("Usage: tuibrowser <url>")
+                print("Run in a terminal for interactive mode.")
+            }
             return
         }
 

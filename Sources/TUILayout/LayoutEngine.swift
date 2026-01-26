@@ -55,20 +55,45 @@ public struct LayoutEngine: Sendable {
         styles: StyleMap,
         parentStyle: ComputedStyle
     ) -> LayoutBox? {
-        let style = StyleResolver.getStyle(for: element, from: styles)
+        var style = StyleResolver.getStyle(for: element, from: styles)
 
         // Skip hidden elements
         if style.display == .none {
             return nil
         }
 
+        // Handle special tags
+        let tagName = element.tagName
+        switch tagName {
+        case "center":
+            // <center> tag centers its content
+            style.textAlign = .center
+        case "table", "tbody", "thead", "tfoot":
+            // Tables are block-level
+            style.display = .block
+        case "tr":
+            // Table rows are block-level, children flow horizontally
+            style.display = .block
+        case "td", "th":
+            // Table cells are inline-block
+            style.display = .inlineBlock
+        case "input", "select", "button", "textarea":
+            // Form elements are inline-block
+            style.display = .inlineBlock
+        case "img":
+            // Images are inline-block
+            style.display = .inlineBlock
+        default:
+            break
+        }
+
         // Create box for element
         let boxType: BoxType
         switch style.display {
-        case .block, .listItem:
+        case .block, .listItem, .flex:
             boxType = .block
-        case .inline:
-            boxType = .inline
+        case .inline, .inlineFlex:
+            boxType = style.display == .inlineFlex ? .inlineBlock : .inline
         case .inlineBlock:
             boxType = .inlineBlock
         case .none:
@@ -117,7 +142,10 @@ public struct LayoutEngine: Sendable {
     private func computeLayout(_ box: LayoutBox, containingWidth: Int) {
         box.dimensions.positionAt(x: 0, y: 0)
 
-        if box.isBlock || box.boxType == .anonymous {
+        // Check if this is a flex container
+        if box.style.display.isFlex {
+            FlexLayout().layout(box, containingWidth: containingWidth)
+        } else if box.isBlock || box.boxType == .anonymous {
             BlockLayout().layout(box, containingWidth: containingWidth)
         } else {
             InlineLayout().layout(box, containingWidth: containingWidth)

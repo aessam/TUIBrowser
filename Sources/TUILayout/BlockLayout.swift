@@ -45,9 +45,15 @@ public struct BlockLayout: Sendable {
     // MARK: - Child Layout
 
     private func layoutChildren(_ box: LayoutBox) {
-        // Determine if we need to create anonymous boxes for mixed content
-        if box.hasBlockChildren && !box.hasOnlyInlineChildren {
-            wrapInlineChildren(box)
+        // Only wrap inline children if this is not already an anonymous box
+        // (to prevent infinite recursion)
+        if box.boxType != .anonymous {
+            let hasInlineContent = box.children.contains { $0.isInline }
+            let hasMixedContent = box.hasBlockChildren && hasInlineContent
+
+            if hasMixedContent || (hasInlineContent && !box.children.isEmpty) {
+                wrapInlineChildren(box)
+            }
         }
 
         // Layout children
@@ -59,10 +65,15 @@ public struct BlockLayout: Sendable {
             child.dimensions.positionAt(x: childX, y: currentY)
 
             // Layout the child based on its type
-            if child.isBlock || child.boxType == .anonymous {
+            if child.style.display.isFlex {
+                FlexLayout().layout(child, containingWidth: box.dimensions.content.width)
+            } else if child.isBlock {
                 BlockLayout().layout(child, containingWidth: box.dimensions.content.width)
+            } else if child.boxType == .anonymous {
+                // Anonymous box with inline content - use InlineLayout
+                InlineLayout().layout(child, containingWidth: box.dimensions.content.width)
             } else {
-                // Inline content within a block - create inline formatting context
+                // Single inline element in a block - wrap in anonymous for proper inline layout
                 InlineLayout().layout(child, containingWidth: box.dimensions.content.width)
             }
 

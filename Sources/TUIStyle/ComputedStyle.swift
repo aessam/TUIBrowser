@@ -13,6 +13,8 @@ public enum Display: String, Equatable, Hashable, Sendable {
     case inlineBlock = "inline-block"
     case none
     case listItem = "list-item"
+    case flex
+    case inlineFlex = "inline-flex"
 
     /// Initialize from CSS keyword
     public init?(keyword: String) {
@@ -22,6 +24,99 @@ public enum Display: String, Equatable, Hashable, Sendable {
         case "inline-block": self = .inlineBlock
         case "none": self = .none
         case "list-item": self = .listItem
+        case "flex": self = .flex
+        case "inline-flex": self = .inlineFlex
+        default: return nil
+        }
+    }
+
+    /// Whether this display type creates a flex container
+    public var isFlex: Bool {
+        self == .flex || self == .inlineFlex
+    }
+}
+
+// MARK: - Flexbox Properties
+
+/// CSS flex-direction values
+public enum FlexDirection: String, Equatable, Hashable, Sendable {
+    case row
+    case rowReverse = "row-reverse"
+    case column
+    case columnReverse = "column-reverse"
+
+    public init?(keyword: String) {
+        switch keyword.lowercased() {
+        case "row": self = .row
+        case "row-reverse": self = .rowReverse
+        case "column": self = .column
+        case "column-reverse": self = .columnReverse
+        default: return nil
+        }
+    }
+
+    public var isHorizontal: Bool {
+        self == .row || self == .rowReverse
+    }
+
+    public var isReversed: Bool {
+        self == .rowReverse || self == .columnReverse
+    }
+}
+
+/// CSS justify-content values
+public enum JustifyContent: String, Equatable, Hashable, Sendable {
+    case flexStart = "flex-start"
+    case flexEnd = "flex-end"
+    case center
+    case spaceBetween = "space-between"
+    case spaceAround = "space-around"
+    case spaceEvenly = "space-evenly"
+
+    public init?(keyword: String) {
+        switch keyword.lowercased() {
+        case "flex-start", "start": self = .flexStart
+        case "flex-end", "end": self = .flexEnd
+        case "center": self = .center
+        case "space-between": self = .spaceBetween
+        case "space-around": self = .spaceAround
+        case "space-evenly": self = .spaceEvenly
+        default: return nil
+        }
+    }
+}
+
+/// CSS align-items values
+public enum AlignItems: String, Equatable, Hashable, Sendable {
+    case flexStart = "flex-start"
+    case flexEnd = "flex-end"
+    case center
+    case baseline
+    case stretch
+
+    public init?(keyword: String) {
+        switch keyword.lowercased() {
+        case "flex-start", "start": self = .flexStart
+        case "flex-end", "end": self = .flexEnd
+        case "center": self = .center
+        case "baseline": self = .baseline
+        case "stretch": self = .stretch
+        default: return nil
+        }
+    }
+}
+
+/// CSS flex-wrap values
+public enum FlexWrap: String, Equatable, Hashable, Sendable {
+    case nowrap
+    case wrap
+    case wrapReverse = "wrap-reverse"
+
+    public init?(keyword: String) {
+        switch keyword.lowercased() {
+        case "nowrap": self = .nowrap
+        case "wrap": self = .wrap
+        case "wrap-reverse": self = .wrapReverse
         default: return nil
         }
     }
@@ -211,6 +306,13 @@ public struct ComputedStyle: Equatable, Sendable {
     // List
     public var listStyleType: ListStyleType
 
+    // Flexbox (only relevant when display is flex/inline-flex)
+    public var flexDirection: FlexDirection
+    public var justifyContent: JustifyContent
+    public var alignItems: AlignItems
+    public var flexWrap: FlexWrap
+    public var gap: Int  // Simplified: single gap value for both row and column
+
     // MARK: - Initialization
 
     public init(
@@ -224,7 +326,12 @@ public struct ComputedStyle: Equatable, Sendable {
         whiteSpace: WhiteSpace = .normal,
         margin: EdgeInsets = .zero,
         padding: EdgeInsets = .zero,
-        listStyleType: ListStyleType = .disc
+        listStyleType: ListStyleType = .disc,
+        flexDirection: FlexDirection = .row,
+        justifyContent: JustifyContent = .flexStart,
+        alignItems: AlignItems = .stretch,
+        flexWrap: FlexWrap = .nowrap,
+        gap: Int = 0
     ) {
         self.display = display
         self.color = color
@@ -237,6 +344,11 @@ public struct ComputedStyle: Equatable, Sendable {
         self.margin = margin
         self.padding = padding
         self.listStyleType = listStyleType
+        self.flexDirection = flexDirection
+        self.justifyContent = justifyContent
+        self.alignItems = alignItems
+        self.flexWrap = flexWrap
+        self.gap = gap
     }
 
     // MARK: - Default Styles
