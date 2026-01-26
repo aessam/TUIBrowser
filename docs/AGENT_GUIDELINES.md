@@ -34,8 +34,28 @@ Tests/<ModuleName>Tests/  <- Your test files
 
 2. **TDD - Tests First**
    - Write failing tests that define expected behavior
-   - Run: `swift test --filter <YourModule>`
+   - **IMPORTANT**: Use isolated build directories to avoid conflicts!
+   - Run: `swift build --scratch-path /tmp/build_<your_agent_id>`
+   - Run: `swift test --scratch-path /tmp/build_<your_agent_id> --filter <YourModule>`
+   - Or use helper scripts: `./scripts/test.sh <your_agent_id> --filter <YourModule>`
    - Implement code to make tests pass
+
+## Build Isolation (CRITICAL)
+
+SwiftPM uses a single build lock per directory. Multiple agents CANNOT build simultaneously!
+
+**Solution**: Each agent MUST use a unique scratch path:
+```bash
+# Use your agent ID or module name as the unique identifier
+swift build --scratch-path /tmp/build_html_parser
+swift test --scratch-path /tmp/build_html_parser --filter TUIHTMLParser
+
+# Or use the helper scripts:
+./scripts/build.sh html_parser
+./scripts/test.sh html_parser --filter TUIHTMLParser
+```
+
+**Never** run `swift build` or `swift test` without `--scratch-path` when other agents might be working!
 
 3. **Interface Compliance**
    - Your public API MUST match INTERFACES.md
