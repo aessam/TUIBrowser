@@ -66,8 +66,10 @@ public struct LayoutEngine: Sendable {
         let tagName = element.tagName
         switch tagName {
         case "center":
-            // <center> tag centers its content and is block-level
-            style.display = .block
+            // <center> tag centers its content using flexbox
+            style.display = .flex
+            style.flexDirection = .column
+            style.alignItems = .center
             style.textAlign = .center
         case "table", "tbody", "thead", "tfoot":
             // Tables are block-level

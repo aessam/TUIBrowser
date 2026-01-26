@@ -8,6 +8,7 @@ import TUITerminal
 import TUICore
 import TUIHTMLParser
 import TUILayout
+import TUIRender
 
 // MARK: - Command Line Arguments
 
@@ -17,6 +18,7 @@ struct CLIOptions {
     var height: Int?
     var dumpHTML: Bool = false
     var dumpLayout: Bool = false
+    var renderPNG: String? = nil  // Path to render PNG output
     var showHelp: Bool = false
     var showVersion: Bool = false
     var noColor: Bool = false
@@ -50,6 +52,11 @@ func parseArguments() -> CLIOptions {
             if index < allArgs.count, let height = Int(allArgs[index]) {
                 options.height = height
             }
+        case "--render-png":
+            index += 1
+            if index < allArgs.count {
+                options.renderPNG = allArgs[index]
+            }
         default:
             if !arg.hasPrefix("-") {
                 options.url = arg
@@ -78,6 +85,7 @@ func showHelp() {
         -H, --height <HEIGHT>    Set terminal height (default: auto-detect)
         --dump-html              Dump parsed HTML and exit
         --dump-layout            Dump layout tree and exit
+        --render-png <PATH>      Render page to PNG file and exit
         --no-color               Disable color output
 
     EXAMPLES:
@@ -150,7 +158,11 @@ func runMain() async {
     // Handle URL
     if let url = options.url {
         // Debug/dump modes (non-interactive)
-        if options.dumpHTML || options.dumpLayout {
+        if options.dumpHTML || options.dumpLayout || options.renderPNG != nil {
+            // Set terminal size for layout calculation
+            let height = options.height ?? termSize.height
+            browser.setTerminalSize(width: width, height: height)
+
             do {
                 print("Fetching: \(url)...")
                 try await browser.navigate(to: url)
@@ -177,6 +189,39 @@ func runMain() async {
                         print("")
                         dumpLayoutBox(layout, indent: 0)
                     }
+                    return
+                }
+
+                if let pngPath = options.renderPNG {
+                    // Render to PNG
+                    #if canImport(CoreGraphics) && canImport(ImageIO)
+                    let renderWidth = options.width ?? 240  // Default to 240 columns (Full HD at 8px/char)
+                    let renderHeight = options.height ?? 67  // Default to ~67 rows (1080 at 16px/char)
+                    browser.setTerminalSize(width: renderWidth, height: renderHeight)
+
+                    // Re-layout with new size
+                    try await browser.navigate(to: url)
+
+                    // Create canvas and render
+                    if let layout = browser.state.layout {
+                        let canvas = Canvas(width: renderWidth, height: renderHeight)
+                        let renderer = Renderer()
+                        renderer.render(layout: layout, to: canvas, scrollY: 0)
+
+                        // Render to PNG
+                        let pngRenderer = PNGRenderer()
+                        if pngRenderer.render(canvas, to: pngPath) {
+                            print("Rendered to: \(pngPath)")
+                            print("Image size: \(renderWidth * pngRenderer.cellWidth)x\(renderHeight * pngRenderer.cellHeight) pixels")
+                        } else {
+                            print("Error: Failed to render PNG")
+                            exit(1)
+                        }
+                    }
+                    #else
+                    print("Error: PNG rendering requires macOS (CoreGraphics)")
+                    exit(1)
+                    #endif
                     return
                 }
             } catch {

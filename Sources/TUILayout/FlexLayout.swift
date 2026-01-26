@@ -333,8 +333,8 @@ public struct FlexLayout: Sendable {
                 break // Handle in loop
             }
 
-            // Calculate line width (for alignment)
-            let lineWidth = line.reduce(0) { max($0, $1.dimensions.totalWidth) }
+            // Calculate line width (for alignment) - use container width, not max item width
+            let alignmentWidth = contentRect.width
 
             // Position each child
             for (index, child) in line.enumerated() {
@@ -344,9 +344,9 @@ public struct FlexLayout: Sendable {
                 case .flexStart:
                     childX = currentX
                 case .flexEnd:
-                    childX = currentX + lineWidth - child.dimensions.totalWidth
+                    childX = currentX + alignmentWidth - child.dimensions.totalWidth
                 case .center:
-                    childX = currentX + (lineWidth - child.dimensions.totalWidth) / 2
+                    childX = currentX + (alignmentWidth - child.dimensions.totalWidth) / 2
                 case .baseline, .stretch:
                     childX = currentX
                 }
@@ -372,6 +372,7 @@ public struct FlexLayout: Sendable {
             }
 
             // Move X for next column (line)
+            let lineWidth = line.reduce(0) { max($0, $1.dimensions.totalWidth) }
             currentX += lineWidth + gap
         }
     }

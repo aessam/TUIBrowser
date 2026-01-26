@@ -218,8 +218,8 @@ public final class Browser {
     private var canvas: Canvas?
 
     /// Terminal dimensions
-    private var terminalWidth: Int = 80
-    private var terminalHeight: Int = 24
+    private var terminalWidth: Int
+    private var terminalHeight: Int
 
     // MARK: - Initialization
 
@@ -233,6 +233,16 @@ public final class Browser {
             maxRedirects: config.maxRedirects,
             defaultHeaders: ["User-Agent": config.userAgent]
         )
+        // Initialize terminal dimensions from current terminal size
+        let size = TerminalSize.current()
+        self.terminalWidth = size.width
+        self.terminalHeight = size.height
+    }
+
+    /// Set terminal dimensions (useful for non-interactive mode)
+    public func setTerminalSize(width: Int, height: Int) {
+        self.terminalWidth = width
+        self.terminalHeight = height
     }
 
     // MARK: - Navigation

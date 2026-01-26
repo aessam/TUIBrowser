@@ -57,10 +57,23 @@ public struct BlockLayout: Sendable {
             resolvedWidth = max(resolvedWidth, minResolved)
         }
 
+        // Store old content position (before padding was set)
+        let oldX = box.dimensions.content.x
+        let oldY = box.dimensions.content.y
+
         // Set dimensions
         box.dimensions.margin = style.margin
         box.dimensions.padding = style.padding
         box.dimensions.setContentWidth(max(0, resolvedWidth))
+
+        // Update content position to account for padding
+        // The content area should be offset by padding from the box origin
+        box.dimensions.content = Rect(
+            x: oldX + style.padding.left,
+            y: oldY + style.padding.top,
+            width: box.dimensions.content.width,
+            height: box.dimensions.content.height
+        )
 
         // Handle margin:auto for horizontal centering
         if style.marginLeftAuto && style.marginRightAuto {
