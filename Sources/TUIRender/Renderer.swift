@@ -24,11 +24,35 @@ public struct Renderer: Sendable {
     /// Image render options
     public var imageOptions: ImageRenderOptions
 
-    public init(imageCache: (any ImageCacheProtocol)? = nil, imageOptions: ImageRenderOptions = .init()) {
+    /// Object ID of currently focused element (for rendering focus indicators)
+    public var focusedElementId: ObjectIdentifier?
+
+    /// Whether the browser is in text input mode
+    public var isInTextInputMode: Bool
+
+    /// Cursor position for text input (if in text input mode)
+    public var textInputCursor: Int
+
+    public init(
+        imageCache: (any ImageCacheProtocol)? = nil,
+        imageOptions: ImageRenderOptions = .init(),
+        focusedElement: Element? = nil,
+        isInTextInputMode: Bool = false,
+        textInputCursor: Int = 0
+    ) {
         self.textRenderer = TextRenderer()
         self.boxRenderer = BoxRenderer()
         self.imageCache = imageCache
         self.imageOptions = imageOptions
+        self.focusedElementId = focusedElement.map { ObjectIdentifier($0) }
+        self.isInTextInputMode = isInTextInputMode
+        self.textInputCursor = textInputCursor
+    }
+
+    /// Check if an element is the focused element
+    private func isFocused(_ element: Element) -> Bool {
+        guard let focusedId = focusedElementId else { return false }
+        return ObjectIdentifier(element) == focusedId
     }
 
     // MARK: - Main Render API
@@ -186,8 +210,20 @@ public struct Renderer: Sendable {
             }
 
         case "a":
-            // Links are rendered by their text children with link styling
-            break
+            // Render link focus indicator
+            if isFocused(element) {
+                // Draw focus brackets around the link
+                let focusStyle = TextStyle(bold: true, foreground: .cyan)
+                if renderY >= 0 && renderY < canvas.height {
+                    if content.x > 0 {
+                        canvas.setCell(x: content.x - 1, y: renderY, char: "›", style: focusStyle)
+                    }
+                    let endX = content.x + content.width
+                    if endX < canvas.width {
+                        canvas.setCell(x: endX, y: renderY, char: "‹", style: focusStyle)
+                    }
+                }
+            }
 
         case "input":
             renderInput(element, at: Point(x: content.x, y: renderY), width: content.width, to: canvas)
@@ -286,9 +322,10 @@ public struct Renderer: Sendable {
         let placeholder = element.getAttribute("placeholder") ?? ""
         let checked = element.hasAttribute("checked")
         let disabled = element.hasAttribute("disabled")
+        let isFocused = self.isFocused(element)
 
-        let fgColor: Color = disabled ? .gray : .white
-        let bgColor = Color(r: 30, g: 30, b: 30)
+        let fgColor: Color = disabled ? .gray : (isFocused ? .cyan : .white)
+        let bgColor = isFocused ? Color(r: 40, g: 40, b: 50) : Color(r: 30, g: 30, b: 30)
 
         switch inputType {
         case "checkbox":
@@ -324,6 +361,8 @@ public struct Renderer: Sendable {
                 width: max(10, min(width, 40)),
                 fgColor: fgColor,
                 bgColor: bgColor,
+                isFocused: isFocused,
+                cursorPosition: isInTextInputMode && isFocused ? textInputCursor : nil,
                 to: canvas
             )
         }
@@ -338,14 +377,18 @@ public struct Renderer: Sendable {
         width: Int,
         fgColor: Color,
         bgColor: Color,
+        isFocused: Bool,
+        cursorPosition: Int?,
         to canvas: Canvas
     ) {
         guard position.y >= 0 && position.y < canvas.height else { return }
 
         let fieldWidth = max(10, width)
-        let borderStyle = TextStyle(foreground: Color(r: 80, g: 80, b: 80))
+        let borderColor = isFocused ? Color(r: 100, g: 150, b: 200) : Color(r: 80, g: 80, b: 80)
+        let borderStyle = TextStyle(foreground: borderColor)
         let textStyle = TextStyle(foreground: fgColor, background: bgColor)
         let placeholderStyle = TextStyle(foreground: .gray, background: bgColor)
+        let cursorStyle = TextStyle(foreground: .cyan, background: bgColor)
 
         // Draw top border: ┌─────┐
         var topBorder = "┌"
@@ -391,8 +434,24 @@ public struct Renderer: Sendable {
             for i in 0..<contentWidth {
                 let x = position.x + 1 + i
                 guard x >= 0 && x < canvas.width else { continue }
-                let char: Character = i < displayText.count ? Array(displayText)[i] : " "
-                canvas.setCell(x: x, y: contentY, char: char, style: useStyle)
+
+                // Determine if cursor is at this position
+                let isCursorHere = cursorPosition != nil && i == cursorPosition
+
+                let char: Character
+                let charStyle: TextStyle
+                if isCursorHere {
+                    // Draw cursor
+                    char = i < displayText.count ? Array(displayText)[i] : "▎"
+                    charStyle = cursorStyle
+                } else if i < displayText.count {
+                    char = Array(displayText)[i]
+                    charStyle = useStyle
+                } else {
+                    char = " "
+                    charStyle = useStyle
+                }
+                canvas.setCell(x: x, y: contentY, char: char, style: charStyle)
             }
 
             // Right border
@@ -424,10 +483,11 @@ public struct Renderer: Sendable {
         let buttonText = element.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = buttonText.isEmpty ? "Button" : buttonText
         let disabled = element.hasAttribute("disabled")
+        let isFocused = self.isFocused(element)
 
-        let fgColor: Color = disabled ? .gray : .white
-        let bgColor = Color(r: 50, g: 50, b: 60)
-        let borderColor = Color(r: 100, g: 100, b: 120)
+        let fgColor: Color = disabled ? .gray : (isFocused ? .cyan : .white)
+        let bgColor = isFocused ? Color(r: 60, g: 60, b: 80) : Color(r: 50, g: 50, b: 60)
+        let borderColor = isFocused ? Color(r: 120, g: 160, b: 200) : Color(r: 100, g: 100, b: 120)
 
         let contentWidth = text.count + 2  // padding on each side
         let buttonWidth = contentWidth + 2  // borders

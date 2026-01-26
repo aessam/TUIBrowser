@@ -74,20 +74,29 @@ public struct FlexLayout: Sendable {
 
     private func measureChildren(_ children: [LayoutBox], isHorizontal: Bool, containerWidth: Int) {
         for child in children {
-            // For now, use simple sizing based on content
-            // Real implementation would consider flex-basis, flex-grow, flex-shrink
+            // Determine base size from flex-basis or content
+            let baseSize: Int
+
+            if let flexBasis = child.style.flexBasis, !flexBasis.isAuto {
+                // Use explicit flex-basis
+                baseSize = flexBasis.resolve(against: containerWidth)
+            } else if child.boxType == .text {
+                // Text nodes get their natural width
+                baseSize = child.textContent?.count ?? 0
+            } else if child.isBlock {
+                // Block children: estimate content width
+                baseSize = estimateContentWidth(child)
+            } else {
+                baseSize = estimateContentWidth(child)
+            }
 
             if child.boxType == .text {
-                // Text nodes get their natural width
-                let textLength = child.textContent?.count ?? 0
-                child.dimensions.setContentWidth(min(textLength, containerWidth))
+                child.dimensions.setContentWidth(min(baseSize, containerWidth))
                 child.dimensions.setContentHeight(1)
             } else if child.isBlock {
                 // Block children take full width in column flex, or natural width in row flex
                 if isHorizontal {
-                    // In row direction, children get minimum width for content
-                    let contentWidth = estimateContentWidth(child)
-                    child.dimensions.setContentWidth(min(contentWidth, containerWidth))
+                    child.dimensions.setContentWidth(min(baseSize, containerWidth))
                 } else {
                     child.dimensions.setContentWidth(containerWidth)
                 }
@@ -96,6 +105,36 @@ public struct FlexLayout: Sendable {
                 BlockLayout().layout(child, containingWidth: child.dimensions.content.width)
             } else {
                 InlineLayout().layout(child, containingWidth: containerWidth)
+            }
+        }
+    }
+
+    /// Distribute remaining space among flex items based on flex-grow
+    private func distributeSpace(_ children: [LayoutBox], remainingSpace: Int, isHorizontal: Bool) {
+        guard remainingSpace > 0 else { return }
+
+        // Calculate total flex-grow
+        let totalGrow = children.reduce(0.0) { $0 + $1.style.flexGrow }
+        guard totalGrow > 0 else { return }
+
+        // Distribute space proportionally
+        var spaceDistributed = 0
+        for (index, child) in children.enumerated() {
+            if child.style.flexGrow > 0 {
+                let share: Int
+                if index == children.count - 1 {
+                    // Give remaining space to last item to avoid rounding errors
+                    share = remainingSpace - spaceDistributed
+                } else {
+                    share = Int(Double(remainingSpace) * (child.style.flexGrow / totalGrow))
+                }
+
+                if isHorizontal {
+                    child.dimensions.setContentWidth(child.dimensions.content.width + share)
+                } else {
+                    child.dimensions.setContentHeight(child.dimensions.content.height + share)
+                }
+                spaceDistributed += share
             }
         }
     }
@@ -162,7 +201,16 @@ public struct FlexLayout: Sendable {
             // Calculate total children width and remaining space
             let totalChildWidth = line.reduce(0) { $0 + $1.dimensions.totalWidth }
             let totalGaps = (line.count - 1) * gap
-            let remainingSpace = max(0, contentRect.width - totalChildWidth - totalGaps)
+            var remainingSpace = max(0, contentRect.width - totalChildWidth - totalGaps)
+
+            // Distribute remaining space using flex-grow
+            let hasFlexGrow = line.contains { $0.style.flexGrow > 0 }
+            if hasFlexGrow && remainingSpace > 0 {
+                distributeSpace(line, remainingSpace: remainingSpace, isHorizontal: true)
+                // Recalculate remaining space after distribution
+                let newTotalWidth = line.reduce(0) { $0 + $1.dimensions.totalWidth }
+                remainingSpace = max(0, contentRect.width - newTotalWidth - totalGaps)
+            }
 
             // Position children based on justify-content
             var currentX = contentRect.x

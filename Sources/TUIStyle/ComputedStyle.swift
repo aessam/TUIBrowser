@@ -246,6 +246,59 @@ public enum WhiteSpace: String, Equatable, Hashable, Sendable {
     }
 }
 
+// MARK: - CSS Length
+
+/// Represents a CSS length value that can be auto, a fixed value, or a percentage
+public enum CSSLength: Equatable, Hashable, Sendable {
+    case auto
+    case px(Int)           // Fixed pixel value (in character cells)
+    case percent(Double)   // Percentage of containing block
+
+    /// Resolve this length against a containing block size
+    /// - Parameter containingSize: The size of the containing block in character cells
+    /// - Returns: The resolved size in character cells
+    public func resolve(against containingSize: Int) -> Int {
+        switch self {
+        case .auto:
+            return containingSize  // auto defaults to full container
+        case .px(let value):
+            return value
+        case .percent(let pct):
+            return Int(Double(containingSize) * pct / 100.0)
+        }
+    }
+
+    /// Check if this length is auto
+    public var isAuto: Bool {
+        if case .auto = self { return true }
+        return false
+    }
+}
+
+// MARK: - CSS Margin Value
+
+/// Represents a CSS margin value that can be auto or a length
+public enum CSSMarginValue: Equatable, Hashable, Sendable {
+    case auto
+    case length(Int)       // Fixed value in character cells
+
+    /// Resolve this margin, treating auto as the provided value
+    public func resolve(autoValue: Int = 0) -> Int {
+        switch self {
+        case .auto:
+            return autoValue
+        case .length(let value):
+            return value
+        }
+    }
+
+    /// Check if this margin is auto
+    public var isAuto: Bool {
+        if case .auto = self { return true }
+        return false
+    }
+}
+
 // MARK: - List Style Type
 
 /// CSS list-style-type values
@@ -313,6 +366,23 @@ public struct ComputedStyle: Equatable, Sendable {
     public var flexWrap: FlexWrap
     public var gap: Int  // Simplified: single gap value for both row and column
 
+    // Flex item properties
+    public var flexGrow: Double = 0
+    public var flexShrink: Double = 1
+    public var flexBasis: CSSLength? = nil
+
+    // Sizing (for block and flex items)
+    public var width: CSSLength? = nil       // nil = auto
+    public var height: CSSLength? = nil
+    public var minWidth: CSSLength? = nil
+    public var maxWidth: CSSLength? = nil
+    public var minHeight: CSSLength? = nil
+    public var maxHeight: CSSLength? = nil
+
+    // Margin auto values (for centering)
+    public var marginLeftAuto: Bool = false
+    public var marginRightAuto: Bool = false
+
     // MARK: - Initialization
 
     public init(
@@ -331,7 +401,15 @@ public struct ComputedStyle: Equatable, Sendable {
         justifyContent: JustifyContent = .flexStart,
         alignItems: AlignItems = .stretch,
         flexWrap: FlexWrap = .nowrap,
-        gap: Int = 0
+        gap: Int = 0,
+        width: CSSLength? = nil,
+        height: CSSLength? = nil,
+        minWidth: CSSLength? = nil,
+        maxWidth: CSSLength? = nil,
+        minHeight: CSSLength? = nil,
+        maxHeight: CSSLength? = nil,
+        marginLeftAuto: Bool = false,
+        marginRightAuto: Bool = false
     ) {
         self.display = display
         self.color = color
@@ -349,6 +427,14 @@ public struct ComputedStyle: Equatable, Sendable {
         self.alignItems = alignItems
         self.flexWrap = flexWrap
         self.gap = gap
+        self.width = width
+        self.height = height
+        self.minWidth = minWidth
+        self.maxWidth = maxWidth
+        self.minHeight = minHeight
+        self.maxHeight = maxHeight
+        self.marginLeftAuto = marginLeftAuto
+        self.marginRightAuto = marginRightAuto
     }
 
     // MARK: - Default Styles

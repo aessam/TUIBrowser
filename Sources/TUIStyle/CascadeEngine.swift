@@ -326,8 +326,19 @@ public struct CascadeEngine: Sendable {
             }
 
         case "margin-left":
-            if let px = resolveLength(value) {
+            if let keyword = value.keywordValue, keyword.lowercased() == "auto" {
+                style.marginLeftAuto = true
+            } else if let px = resolveLength(value) {
                 style.margin = EdgeInsets(top: style.margin.top, right: style.margin.right, bottom: style.margin.bottom, left: px)
+                style.marginLeftAuto = false
+            }
+
+        case "margin-right":
+            if let keyword = value.keywordValue, keyword.lowercased() == "auto" {
+                style.marginRightAuto = true
+            } else if let px = resolveLength(value) {
+                style.margin = EdgeInsets(top: style.margin.top, right: px, bottom: style.margin.bottom, left: style.margin.left)
+                style.marginRightAuto = false
             }
 
         case "padding":
@@ -355,8 +366,124 @@ public struct CascadeEngine: Sendable {
                 style.padding = EdgeInsets(top: style.padding.top, right: style.padding.right, bottom: style.padding.bottom, left: px)
             }
 
+        // Width/Height sizing
+        case "width":
+            style.width = resolveCSSLength(value)
+
+        case "height":
+            style.height = resolveCSSLength(value)
+
+        case "min-width":
+            style.minWidth = resolveCSSLength(value)
+
+        case "max-width":
+            style.maxWidth = resolveCSSLength(value)
+
+        case "min-height":
+            style.minHeight = resolveCSSLength(value)
+
+        case "max-height":
+            style.maxHeight = resolveCSSLength(value)
+
+        // Flexbox properties
+        case "flex-direction":
+            if let keyword = value.keywordValue,
+               let dir = FlexDirection(keyword: keyword) {
+                style.flexDirection = dir
+            }
+
+        case "justify-content":
+            if let keyword = value.keywordValue,
+               let jc = JustifyContent(keyword: keyword) {
+                style.justifyContent = jc
+            }
+
+        case "align-items":
+            if let keyword = value.keywordValue,
+               let ai = AlignItems(keyword: keyword) {
+                style.alignItems = ai
+            }
+
+        case "flex-wrap":
+            if let keyword = value.keywordValue,
+               let fw = FlexWrap(keyword: keyword) {
+                style.flexWrap = fw
+            }
+
+        case "gap":
+            if let px = resolveLength(value) {
+                style.gap = px
+            }
+
+        case "flex-grow":
+            if let num = value.numericValue {
+                style.flexGrow = num
+            }
+
+        case "flex-shrink":
+            if let num = value.numericValue {
+                style.flexShrink = num
+            }
+
+        case "flex-basis":
+            style.flexBasis = resolveCSSLength(value)
+
+        case "flex":
+            // Shorthand: flex-grow [flex-shrink] [flex-basis]
+            // Simple handling: just extract grow value
+            if let num = value.numericValue {
+                style.flexGrow = num
+            } else if let keyword = value.keywordValue {
+                switch keyword.lowercased() {
+                case "auto":
+                    style.flexGrow = 1
+                    style.flexShrink = 1
+                    style.flexBasis = .auto
+                case "none":
+                    style.flexGrow = 0
+                    style.flexShrink = 0
+                    style.flexBasis = .auto
+                case "initial":
+                    style.flexGrow = 0
+                    style.flexShrink = 1
+                    style.flexBasis = .auto
+                default:
+                    break
+                }
+            }
+
         default:
             break  // Unsupported property
+        }
+    }
+
+    /// Resolve a CSS length value to a CSSLength type
+    private func resolveCSSLength(_ value: CSSValue) -> CSSLength? {
+        switch value {
+        case .keyword(let kw) where kw.lowercased() == "auto":
+            return .auto
+        case .length(let num, let unit):
+            switch unit {
+            case .px:
+                return .px(Int(num / 8))  // ~8px per character cell
+            case .em, .rem:
+                return .px(Int(num))  // 1em = 1 character
+            case .ch:
+                return .px(Int(num))  // 1ch = 1 character exactly
+            case .percent:
+                return .percent(num)
+            default:
+                return .px(Int(num / 8))
+            }
+        case .percentage(let pct):
+            return .percent(pct)
+        case .number(let num):
+            if num == 0 {
+                return .px(0)
+            }
+            return .px(Int(num))
+        default:
+            return nil
         }
     }
 

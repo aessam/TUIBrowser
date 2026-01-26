@@ -58,9 +58,19 @@ public struct BrowserConfig: Sendable {
 // MARK: - Input Mode
 
 /// Browser input mode
-public enum InputMode {
-    case normal      // Normal browsing mode
-    case urlInput    // Typing a URL
+public enum InputMode: Equatable {
+    case normal                    // Normal browsing mode
+    case urlInput                  // Typing a URL
+    case textInput(cursor: Int)    // Typing in a form field (cursor position)
+
+    public static func == (lhs: InputMode, rhs: InputMode) -> Bool {
+        switch (lhs, rhs) {
+        case (.normal, .normal): return true
+        case (.urlInput, .urlInput): return true
+        case (.textInput(let c1), .textInput(let c2)): return c1 == c2
+        default: return false
+        }
+    }
 }
 
 // MARK: - Image Cache
@@ -145,6 +155,15 @@ public struct BrowserState {
     /// Last error message
     public var lastError: String?
 
+    /// Focusable elements in the current document
+    public var focusableElements: [Element] = []
+
+    /// Index of currently focused element (nil if nothing focused)
+    public var focusedElementIndex: Int? = nil
+
+    /// Text buffer for focused text input
+    public var textInputBuffer: String = ""
+
     public init() {
         self.currentURL = nil
         self.document = nil
@@ -157,6 +176,18 @@ public struct BrowserState {
         self.statusMessage = "Ready"
         self.isLoading = false
         self.lastError = nil
+        self.focusableElements = []
+        self.focusedElementIndex = nil
+        self.textInputBuffer = ""
+    }
+
+    /// Get the currently focused element
+    public var focusedElement: Element? {
+        guard let index = focusedElementIndex,
+              index >= 0 && index < focusableElements.count else {
+            return nil
+        }
+        return focusableElements[index]
     }
 }
 
@@ -180,6 +211,9 @@ public final class Browser {
     /// Image cache for decoded images
     public let imageCache: ImageCache
 
+    /// Focus manager for keyboard navigation
+    private let focusManager: FocusManager
+
     /// Terminal canvas
     private var canvas: Canvas?
 
@@ -193,6 +227,7 @@ public final class Browser {
         self.config = config
         self.state = BrowserState()
         self.imageCache = ImageCache()
+        self.focusManager = FocusManager()
         self.httpClient = HTTPClient(
             timeout: config.timeout,
             maxRedirects: config.maxRedirects,
@@ -285,6 +320,11 @@ public final class Browser {
         }
         state.history.append(url)
         state.historyIndex = state.history.count - 1
+
+        // Collect focusable elements for keyboard navigation
+        state.focusableElements = focusManager.collectFocusableElements(from: document)
+        state.focusedElementIndex = nil
+        state.textInputBuffer = ""
 
         // Fetch images if enabled
         if config.showImages {
@@ -457,20 +497,31 @@ public final class Browser {
     // MARK: - Rendering
 
     /// Render current page to a canvas
-    public func render(width: Int, height: Int) -> Canvas {
+    public func render(width: Int, height: Int, inputMode: InputMode = .normal) -> Canvas {
         terminalWidth = width
         terminalHeight = height
 
         let canvas = Canvas(width: width, height: height)
 
         if let layout = state.layout {
-            // Create renderer with image cache if images are enabled
-            let renderer: Renderer
-            if config.showImages {
-                renderer = Renderer(imageCache: imageCache)
-            } else {
-                renderer = Renderer()
+            // Create renderer with image cache and focus state
+            let isInTextInput: Bool
+            let textCursor: Int
+            switch inputMode {
+            case .textInput(let cursor):
+                isInTextInput = true
+                textCursor = cursor
+            default:
+                isInTextInput = false
+                textCursor = 0
             }
+
+            let renderer = Renderer(
+                imageCache: config.showImages ? imageCache : nil,
+                focusedElement: state.focusedElement,
+                isInTextInputMode: isInTextInput,
+                textInputCursor: textCursor
+            )
             renderer.render(layout: layout, to: canvas, scrollY: state.scrollY)
         } else {
             // Render welcome/error screen
@@ -616,11 +667,20 @@ public final class Browser {
 
             // Render if needed
             if needsRedraw {
-                let canvas = render(width: terminalWidth, height: terminalHeight)
+                let canvas = render(width: terminalWidth, height: terminalHeight, inputMode: inputMode)
 
                 // Draw URL input bar if in URL input mode
                 if inputMode == .urlInput {
                     drawInputBar(to: canvas, prompt: "URL: ", text: urlBuffer)
+                }
+
+                // Draw text input indicator when in text input mode
+                if case .textInput = inputMode {
+                    if let element = state.focusedElement {
+                        let inputType = element.getAttribute("type")?.lowercased() ?? "text"
+                        let prompt = inputType == "password" ? "Password: " : "Input: "
+                        drawInputBar(to: canvas, prompt: prompt, text: state.textInputBuffer)
+                    }
                 }
 
                 canvas.render(to: output, fullRedraw: needsFullRedraw)
@@ -641,6 +701,9 @@ public final class Browser {
                         inputMode = .urlInput
                         urlBuffer = ""
                         needsRedraw = true
+                    case .enterTextInputMode:
+                        inputMode = .textInput(cursor: state.textInputBuffer.count)
+                        needsRedraw = true
                     case .redraw:
                         needsRedraw = true
                     case .fullRedraw:
@@ -648,6 +711,45 @@ public final class Browser {
                         needsFullRedraw = true
                     case .none:
                         break
+                    }
+
+                case .textInput(let cursor):
+                    var newCursor = cursor
+                    let result = await handleTextInput(key, buffer: &state.textInputBuffer, cursor: &newCursor)
+                    switch result {
+                    case .stay:
+                        inputMode = .textInput(cursor: newCursor)
+                        needsRedraw = true
+                    case .cancel:
+                        inputMode = .normal
+                        needsRedraw = true
+                        needsFullRedraw = true
+                    case .submit:
+                        inputMode = .normal
+                        // Update the element's value
+                        if let element = state.focusedElement {
+                            element.setAttribute("value", state.textInputBuffer)
+                        }
+                        // Try to submit form
+                        if let element = state.focusedElement {
+                            let submitResult = await submitParentForm(of: element)
+                            switch submitResult {
+                            case .fullRedraw:
+                                needsFullRedraw = true
+                            default:
+                                break
+                            }
+                        }
+                        needsRedraw = true
+                        needsFullRedraw = true
+                    case .exitInputMode:
+                        inputMode = .normal
+                        // Update the element's value
+                        if let element = state.focusedElement {
+                            element.setAttribute("value", state.textInputBuffer)
+                        }
+                        needsRedraw = true
+                        needsFullRedraw = true
                     }
 
                 case .urlInput:
@@ -715,6 +817,7 @@ public final class Browser {
         case none
         case exit
         case enterURLMode
+        case enterTextInputMode
         case redraw
         case fullRedraw
     }
@@ -791,9 +894,188 @@ public final class Browser {
         case .ctrlL:
             return .fullRedraw
 
+        // Tab navigation: move focus forward
+        case .tab:
+            return moveFocusForward()
+
+        // Enter: activate focused element
+        case .enter:
+            return await activateFocusedElement()
+
         default:
             return .none
         }
+    }
+
+    // MARK: - Focus Navigation
+
+    /// Move focus to the next focusable element
+    private func moveFocusForward() -> NormalInputResult {
+        guard !state.focusableElements.isEmpty else {
+            state.statusMessage = "No focusable elements"
+            return .redraw
+        }
+
+        if let nextIndex = focusManager.nextFocusIndex(from: state.focusedElementIndex, in: state.focusableElements) {
+            state.focusedElementIndex = nextIndex
+
+            // Scroll to make focused element visible
+            scrollToFocusedElement()
+
+            if let element = state.focusedElement {
+                let tagName = element.tagName.lowercased()
+                let text = element.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                let displayText = text.isEmpty ? tagName : String(text.prefix(30))
+                state.statusMessage = "[\(tagName)] \(displayText)"
+            }
+        }
+        return .redraw
+    }
+
+    /// Move focus to the previous focusable element
+    private func moveFocusBackward() -> NormalInputResult {
+        guard !state.focusableElements.isEmpty else {
+            state.statusMessage = "No focusable elements"
+            return .redraw
+        }
+
+        if let prevIndex = focusManager.previousFocusIndex(from: state.focusedElementIndex, in: state.focusableElements) {
+            state.focusedElementIndex = prevIndex
+
+            // Scroll to make focused element visible
+            scrollToFocusedElement()
+
+            if let element = state.focusedElement {
+                let tagName = element.tagName.lowercased()
+                let text = element.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                let displayText = text.isEmpty ? tagName : String(text.prefix(30))
+                state.statusMessage = "[\(tagName)] \(displayText)"
+            }
+        }
+        return .redraw
+    }
+
+    /// Scroll the viewport to ensure the focused element is visible
+    private func scrollToFocusedElement() {
+        guard let element = state.focusedElement,
+              let layout = state.layout,
+              let box = focusManager.findLayoutBox(for: element, in: layout) else {
+            return
+        }
+
+        let elementY = box.dimensions.content.y
+        let elementHeight = box.dimensions.content.height
+        let viewportHeight = terminalHeight - 2  // Account for status bar
+
+        // If element is above viewport, scroll up
+        if elementY < state.scrollY {
+            state.scrollY = max(0, elementY - 1)
+        }
+        // If element is below viewport, scroll down
+        else if elementY + elementHeight > state.scrollY + viewportHeight {
+            state.scrollY = elementY + elementHeight - viewportHeight + 1
+        }
+    }
+
+    /// Activate the currently focused element
+    private func activateFocusedElement() async -> NormalInputResult {
+        guard let element = state.focusedElement else {
+            return .none
+        }
+
+        let tagName = element.tagName.lowercased()
+
+        switch tagName {
+        case "a":
+            // Follow link
+            if let href = element.getAttribute("href"),
+               let resolvedURL = resolveURL(href) {
+                state.statusMessage = "Loading..."
+                do {
+                    try await navigate(to: resolvedURL)
+                } catch {
+                    state.lastError = error.localizedDescription
+                }
+                return .fullRedraw
+            }
+
+        case "input":
+            let inputType = element.getAttribute("type")?.lowercased() ?? "text"
+            switch inputType {
+            case "submit":
+                // Submit the form
+                return await submitParentForm(of: element)
+            case "checkbox":
+                // Toggle checkbox
+                if element.hasAttribute("checked") {
+                    element.removeAttribute("checked")
+                } else {
+                    element.setAttribute("checked", "checked")
+                }
+                return .redraw
+            case "radio":
+                // Select radio button
+                element.setAttribute("checked", "checked")
+                return .redraw
+            case "text", "password", "email", "search", "url", "tel", "number":
+                // Enter text input mode
+                state.textInputBuffer = element.getAttribute("value") ?? ""
+                return .enterTextInputMode
+            default:
+                break
+            }
+
+        case "button":
+            // Check if button is inside a form and submits it
+            return await submitParentForm(of: element)
+
+        case "select":
+            // TODO: Implement select dropdown
+            state.statusMessage = "Select dropdowns not yet supported"
+            return .redraw
+
+        case "textarea":
+            // Enter text input mode for textarea
+            state.textInputBuffer = element.textContent
+            return .enterTextInputMode
+
+        default:
+            break
+        }
+
+        return .none
+    }
+
+    /// Submit the parent form of an element
+    private func submitParentForm(of element: Element) async -> NormalInputResult {
+        // Find parent form
+        var current: Node? = element
+        while let node = current {
+            if let el = node as? Element, el.tagName.lowercased() == "form" {
+                return await submitForm(el)
+            }
+            current = node.parentNode
+        }
+        return .none
+    }
+
+    /// Submit a form
+    private func submitForm(_ form: Element) async -> NormalInputResult {
+        let formSubmission = FormSubmission()
+
+        guard let currentURL = state.currentURL,
+              let submitURL = formSubmission.buildSubmitURL(form, baseURL: currentURL) else {
+            state.statusMessage = "Cannot submit form"
+            return .redraw
+        }
+
+        state.statusMessage = "Submitting form..."
+        do {
+            try await navigate(to: submitURL)
+        } catch {
+            state.lastError = error.localizedDescription
+        }
+        return .fullRedraw
     }
 
     /// Result of handling URL input mode
@@ -801,6 +1083,116 @@ public final class Browser {
         case stay
         case cancel
         case submit(String)
+    }
+
+    /// Result of handling text input mode
+    private enum TextInputResult {
+        case stay
+        case cancel
+        case submit
+        case exitInputMode
+    }
+
+    /// Handle input in text input mode (form fields)
+    private func handleTextInput(_ key: KeyCode, buffer: inout String, cursor: inout Int) async -> TextInputResult {
+        switch key {
+        // Submit form
+        case .enter:
+            return .submit
+
+        // Cancel
+        case .escape:
+            return .cancel
+
+        // Exit input mode without submitting
+        case .tab:
+            return .exitInputMode
+
+        // Delete character before cursor
+        case .backspace:
+            if cursor > 0 && !buffer.isEmpty {
+                let index = buffer.index(buffer.startIndex, offsetBy: cursor - 1)
+                buffer.remove(at: index)
+                cursor -= 1
+            }
+            return .stay
+
+        // Delete character at cursor
+        case .delete:
+            if cursor < buffer.count {
+                let index = buffer.index(buffer.startIndex, offsetBy: cursor)
+                buffer.remove(at: index)
+            }
+            return .stay
+
+        // Move cursor left
+        case .left:
+            if cursor > 0 {
+                cursor -= 1
+            }
+            return .stay
+
+        // Move cursor right
+        case .right:
+            if cursor < buffer.count {
+                cursor += 1
+            }
+            return .stay
+
+        // Move cursor to beginning
+        case .home, .ctrlA:
+            cursor = 0
+            return .stay
+
+        // Move cursor to end
+        case .end, .ctrlE:
+            cursor = buffer.count
+            return .stay
+
+        // Delete word
+        case .ctrlW:
+            while cursor > 0 && (cursor > buffer.count || buffer[buffer.index(buffer.startIndex, offsetBy: cursor - 1)] == " ") {
+                let index = buffer.index(buffer.startIndex, offsetBy: cursor - 1)
+                buffer.remove(at: index)
+                cursor -= 1
+            }
+            while cursor > 0 && buffer[buffer.index(buffer.startIndex, offsetBy: cursor - 1)] != " " {
+                let index = buffer.index(buffer.startIndex, offsetBy: cursor - 1)
+                buffer.remove(at: index)
+                cursor -= 1
+            }
+            return .stay
+
+        // Clear line
+        case .ctrlU:
+            buffer = ""
+            cursor = 0
+            return .stay
+
+        // Kill to end of line
+        case .ctrlK:
+            if cursor < buffer.count {
+                let index = buffer.index(buffer.startIndex, offsetBy: cursor)
+                buffer.removeSubrange(index...)
+            }
+            return .stay
+
+        // Add character
+        case .char(let c):
+            let index = buffer.index(buffer.startIndex, offsetBy: cursor)
+            buffer.insert(c, at: index)
+            cursor += 1
+            return .stay
+
+        case .space:
+            let index = buffer.index(buffer.startIndex, offsetBy: cursor)
+            buffer.insert(" ", at: index)
+            cursor += 1
+            return .stay
+
+        default:
+            return .stay
+        }
     }
 
     /// Handle input in URL entry mode

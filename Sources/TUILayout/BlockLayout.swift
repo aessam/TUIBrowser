@@ -32,14 +32,72 @@ public struct BlockLayout: Sendable {
     private func calculateWidth(_ box: LayoutBox, containingWidth: Int) {
         let style = box.style
 
-        // Available width = containing width - margins - padding
-        let availableWidth = containingWidth
+        // Start with containing width minus margins and padding
+        var availableWidth = containingWidth
             - style.margin.horizontal
             - style.padding.horizontal
 
+        // Apply explicit width if set
+        var resolvedWidth = availableWidth
+        if let explicitWidth = style.width {
+            if !explicitWidth.isAuto {
+                resolvedWidth = explicitWidth.resolve(against: containingWidth)
+            }
+        }
+
+        // Apply max-width constraint
+        if let maxW = style.maxWidth {
+            let maxResolved = maxW.resolve(against: containingWidth)
+            resolvedWidth = min(resolvedWidth, maxResolved)
+        }
+
+        // Apply min-width constraint
+        if let minW = style.minWidth {
+            let minResolved = minW.resolve(against: containingWidth)
+            resolvedWidth = max(resolvedWidth, minResolved)
+        }
+
+        // Set dimensions
         box.dimensions.margin = style.margin
         box.dimensions.padding = style.padding
-        box.dimensions.setContentWidth(max(0, availableWidth))
+        box.dimensions.setContentWidth(max(0, resolvedWidth))
+
+        // Handle margin:auto for horizontal centering
+        if style.marginLeftAuto && style.marginRightAuto {
+            let totalContentWidth = resolvedWidth + style.padding.horizontal
+            let remainingSpace = containingWidth - totalContentWidth
+            if remainingSpace > 0 {
+                let autoMargin = remainingSpace / 2
+                box.dimensions.margin = EdgeInsets(
+                    top: style.margin.top,
+                    right: autoMargin,
+                    bottom: style.margin.bottom,
+                    left: autoMargin
+                )
+            }
+        } else if style.marginLeftAuto {
+            let totalContentWidth = resolvedWidth + style.padding.horizontal + style.margin.right
+            let remainingSpace = containingWidth - totalContentWidth
+            if remainingSpace > 0 {
+                box.dimensions.margin = EdgeInsets(
+                    top: style.margin.top,
+                    right: style.margin.right,
+                    bottom: style.margin.bottom,
+                    left: remainingSpace
+                )
+            }
+        } else if style.marginRightAuto {
+            let totalContentWidth = resolvedWidth + style.padding.horizontal + style.margin.left
+            let remainingSpace = containingWidth - totalContentWidth
+            if remainingSpace > 0 {
+                box.dimensions.margin = EdgeInsets(
+                    top: style.margin.top,
+                    right: remainingSpace,
+                    bottom: style.margin.bottom,
+                    left: style.margin.left
+                )
+            }
+        }
     }
 
     // MARK: - Child Layout

@@ -24,7 +24,10 @@
       "Bash(pkill:*)",
       "Bash(/tmp/build_final4/arm64-apple-macosx/debug/tuibrowser:*)",
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(xargs:*)",
+      "Bash(tree:*)"
     ]
   }
 }
