@@ -1,11 +1,12 @@
 // Standalone test for TUICSSParser
 import TUICore
 import TUICSSParser
+import Foundation
 
 print("=== TUICSSParser Tests ===\n")
 
-var passed = 0
-var failed = 0
+nonisolated(unsafe) var passed = 0
+nonisolated(unsafe) var failed = 0
 
 func test(_ name: String, _ condition: Bool) {
     if condition {

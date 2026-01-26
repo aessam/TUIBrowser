@@ -76,11 +76,14 @@ public final class HTMLTokenizer: @unchecked Sendable {
         state = .data
         characterBuffer = ""
 
-        while position <= input.count {
+        while position < input.count {
             processState()
-            if state == .data && position > input.count {
-                break
-            }
+        }
+
+        // Process any remaining state at EOF
+        if state != .data {
+            // Force transition to data state for EOF handling
+            state = .data
         }
 
         flushCharacterBuffer()
