@@ -33,12 +33,12 @@ public struct ColorConverter {
             let avg = (r + g + b) / 3
             if avg < 40 {
                 return .black
-            } else if avg < 100 {
-                return .brightBlack // Gray
-            } else if avg < 180 {
-                return .white
+            } else if avg < 140 {
+                return .brightBlack // Dark to mid-gray
+            } else if avg < 220 {
+                return .white // Light gray
             } else {
-                return .brightWhite
+                return .brightWhite // Very light/white
             }
         }
 

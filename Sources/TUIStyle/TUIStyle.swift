@@ -4,7 +4,7 @@ import TUICore
 import TUIHTMLParser
 import TUICSSParser
 
-/// Style resolution module placeholder
+/// Style module placeholder
 public enum TUIStyle {
     public static let version = "0.1.0"
 }

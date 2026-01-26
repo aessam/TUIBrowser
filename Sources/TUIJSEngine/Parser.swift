@@ -426,10 +426,24 @@ public struct Parser {
             advance()
             return .literal(.undefined)
 
-        // Identifier
+        // Identifier - check for arrow function with single unparenthesized param
         case .identifier:
+            let savedPos = current
             advance()
-            return .identifier(token.lexeme)
+            let identifier = token.lexeme
+
+            // Check if this is a single-param arrow function
+            if check(.arrow) {
+                advance() // consume '=>'
+                if let body = parseArrowBody(params: [identifier]) {
+                    return body
+                } else {
+                    current = savedPos
+                    advance()
+                    return .identifier(identifier)
+                }
+            }
+            return .identifier(identifier)
 
         // this
         case .this:
@@ -515,13 +529,13 @@ public struct Parser {
         // Logical operators
         case .ampAmp:
             advance()
-            if let right = parseExpressionWithPrecedence(.logicalOr) {
+            if let right = parseExpressionWithPrecedence(.logicalAnd) {
                 return .logical(left: left, op: "&&", right: right)
             }
 
         case .pipePipe:
             advance()
-            if let right = parseExpressionWithPrecedence(.logicalAnd) {
+            if let right = parseExpressionWithPrecedence(.logicalOr) {
                 return .logical(left: left, op: "||", right: right)
             }
 

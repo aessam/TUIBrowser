@@ -141,11 +141,13 @@ internal final class HTMLTreeBuilder {
             }
 
         case "head":
+            ensureHtml()
             let element = createElement(tagName: tagName, attributes: attributes)
             insertElement(element)
             currentInsertionMode = .inHead
 
         case "body":
+            ensureHtml()
             let element = createElement(tagName: tagName, attributes: attributes)
             insertElement(element)
             currentInsertionMode = .inBody
@@ -203,8 +205,18 @@ internal final class HTMLTreeBuilder {
     private func processCharacter(text: String) {
         guard !text.isEmpty else { return }
 
-        // Ensure we have a body for text content
-        ensureBody()
+        // In early modes (before html/head), skip whitespace-only text
+        if currentInsertionMode == .initial || currentInsertionMode == .beforeHtml || currentInsertionMode == .beforeHead {
+            if text.allSatisfy({ $0.isWhitespace }) {
+                return
+            }
+        }
+
+        // Only call ensureBody if we're not in head-related modes
+        if currentInsertionMode != .inHead && currentInsertionMode != .beforeHead &&
+           currentInsertionMode != .initial && currentInsertionMode != .beforeHtml {
+            ensureBody()
+        }
 
         // Insert text into current element
         if let currentElement = openElements.last {
@@ -287,9 +299,11 @@ internal final class HTMLTreeBuilder {
         if document.head == nil {
             let head = document.createElement("head")
             document.documentElement?.appendChild(head)
-            if openElements.last?.tagName != "head" {
-                openElements.append(head)
-            }
+            openElements.append(head)
+            currentInsertionMode = .inHead
+        } else if !openElements.contains(where: { $0.tagName == "head" }) {
+            // If head exists but is not in the open elements stack, add it
+            openElements.append(document.head!)
             currentInsertionMode = .inHead
         }
     }

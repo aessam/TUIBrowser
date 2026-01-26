@@ -168,8 +168,11 @@ public struct CSSTokenizer: Sendable {
                     advance()
                 }
 
-                // After skipping a comment, check if there are more or whitespace
-                // Continue to handle consecutive comments
+                // After skipping a comment, skip any trailing whitespace
+                while !isAtEnd && currentChar.isWhitespace {
+                    advance()
+                }
+                // Continue loop to check for more comments
             } else {
                 break
             }
