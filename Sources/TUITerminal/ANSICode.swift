@@ -68,6 +68,14 @@ public enum ANSICode {
     /// Clear from cursor to end of screen
     public static let clearToEndOfScreen = "\u{1B}[J"
 
+    // MARK: - Alternate Screen Buffer
+
+    /// Enter alternate screen buffer (preserves original terminal content)
+    public static let enterAlternateScreen = "\u{1B}[?1049h"
+
+    /// Exit alternate screen buffer (restores original terminal content)
+    public static let exitAlternateScreen = "\u{1B}[?1049l"
+
     // MARK: - 16 Color Mode
 
     /// Set foreground color (16 color)

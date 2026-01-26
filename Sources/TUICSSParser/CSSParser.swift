@@ -75,9 +75,17 @@ private struct CSSParserImpl {
         skipWhitespace()
 
         while !isAtEnd {
+            let startIndex = index  // Track position before parsing
+
             if let rule = parseRule() {
                 rules.append(rule)
             }
+
+            // If we didn't advance, skip the current token to avoid infinite loop
+            if index == startIndex && !isAtEnd {
+                advance()
+            }
+
             skipWhitespace()
         }
 
@@ -144,6 +152,9 @@ private struct CSSParserImpl {
 
             if let decl = parseDeclaration() {
                 declarations.append(decl)
+            } else {
+                // Failed to parse declaration - skip to next semicolon or brace to recover
+                skipToDeclarationEnd()
             }
 
             skipWhitespace()
@@ -155,6 +166,18 @@ private struct CSSParserImpl {
         }
 
         return declarations
+    }
+
+    /// Skip tokens until we reach a semicolon or right brace (for error recovery)
+    private mutating func skipToDeclarationEnd() {
+        while !isAtEnd {
+            switch currentToken {
+            case .semicolon, .rightBrace, .eof:
+                return
+            default:
+                advance()
+            }
+        }
     }
 
     // MARK: - Selector Parsing

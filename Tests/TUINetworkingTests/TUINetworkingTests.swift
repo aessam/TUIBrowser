@@ -386,7 +386,7 @@ struct HTTPClientTests {
     }
 
     @Test func testDefaultHeaders() {
-        var client = HTTPClient()
+        let client = HTTPClient()
         client.defaultHeaders["X-Custom"] = "test"
         #expect(client.defaultHeaders["X-Custom"] == "test")
     }
@@ -397,7 +397,7 @@ struct HTTPClientTests {
             _ = try await client.fetch(urlString: "not a valid url")
             #expect(Bool(false), "Should have thrown")
         } catch let error as NetworkError {
-            #expect(error.description.contains("URL"))
+            #expect(error.description.contains("not a valid url"))
         } catch {
             #expect(Bool(false), "Wrong error type")
         }

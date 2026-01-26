@@ -4,6 +4,6 @@ import Testing
 @Suite("TUIURL Tests")
 struct TUIURLTests {
     @Test func testVersion() {
-        #expect(TUIURL.version == "0.1.0")
+        #expect(TUIURLModule.version == "0.1.0")
     }
 }

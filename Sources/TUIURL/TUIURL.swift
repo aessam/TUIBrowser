@@ -2,8 +2,8 @@
 
 import TUICore
 
-/// URL module namespace
-public enum TUIURL {
+/// URL module version info
+public enum TUIURLModule {
     public static let version = "0.1.0"
 }
 

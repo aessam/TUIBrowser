@@ -147,12 +147,12 @@ public struct HTTPRequest: Sendable {
     /// - Returns: A new HTTPRequest configured for POST with form data
     public static func postForm(_ url: TUIURL.URL, formData: [String: String]) -> HTTPRequest {
         let encoded = formData.map { key, value in
-            let encodedKey = URLEncoder.encode(key) ?? key
-            let encodedValue = URLEncoder.encode(value) ?? value
+            let encodedKey = URLEncoder.encode(key, allowedCharacters: URLEncoder.queryValueAllowed)
+            let encodedValue = URLEncoder.encode(value, allowedCharacters: URLEncoder.queryValueAllowed)
             return "\(encodedKey)=\(encodedValue)"
         }.joined(separator: "&")
 
-        let body = encoded.data(using: .utf8) ?? Data()
+        let body = Data(encoded.utf8)
         return post(url, body: body, contentType: "application/x-www-form-urlencoded")
     }
 

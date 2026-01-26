@@ -50,12 +50,51 @@ public final class HTTPClient: @unchecked Sendable {
         return try await fetch(request: request)
     }
 
+    /// Fetch using URLSession (more reliable for HTTPS)
+    public func fetchWithURLSession(url: TUIURL.URL) async throws -> HTTPResponse {
+        let urlString = url.description
+        guard let nsURL = Foundation.URL(string: urlString) else {
+            throw NetworkError.invalidURL("Invalid URL: \(urlString)")
+        }
+
+        var urlRequest = URLRequest(url: nsURL)
+        urlRequest.timeoutInterval = timeout
+        for (key, value) in defaultHeaders {
+            urlRequest.setValue(value, forHTTPHeaderField: key)
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse("Not an HTTP response")
+        }
+
+        var headers = HTTPHeaders()
+        for (key, value) in httpResponse.allHeaderFields {
+            if let keyStr = key as? String, let valueStr = value as? String {
+                headers[keyStr] = valueStr
+            }
+        }
+
+        return HTTPResponse(
+            statusCode: httpResponse.statusCode,
+            statusMessage: HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
+            headers: headers,
+            body: data,
+            httpVersion: "HTTP/1.1"
+        )
+    }
+
     /// Fetch a URL string using GET method
     /// - Parameter urlString: The URL string to fetch
     /// - Returns: The HTTP response
     /// - Throws: NetworkError if the request fails
     public func fetch(urlString: String) async throws -> HTTPResponse {
-        guard let url = URLParser.parse(urlString) else {
+        let url: TUIURL.URL
+        switch URLParser.parse(urlString) {
+        case .success(let parsed):
+            url = parsed
+        case .failure:
             throw NetworkError.invalidURL("Invalid URL: \(urlString)")
         }
         return try await fetch(url: url)
@@ -85,17 +124,21 @@ public final class HTTPClient: @unchecked Sendable {
             throw NetworkError.invalidURL("Missing host in URL")
         }
 
-        let scheme = request.url.scheme?.lowercased() ?? "http"
+        let scheme = request.url.scheme.lowercased()
         let isHTTPS = scheme == "https"
         let port = request.url.port ?? (isHTTPS ? 443 : 80)
 
+        print("DEBUG: Resolving DNS for \(host)...", terminator: ""); fflush(stdout)
         // Resolve DNS
         let addressInfo = try DNSResolver.getAddressInfo(hostname: host, port: port)
+        print(" done")
 
+        print("DEBUG: Creating socket and connecting to \(host):\(port)...", terminator: ""); fflush(stdout)
         // Create and connect socket
         let socket = try Socket.create(family: SocketFamily(fromRaw: addressInfo.family))
         try socket.setTimeout(seconds: Int(timeout))
         try socket.connect(to: addressInfo)
+        print(" done")
 
         defer { socket.close() }
 
@@ -111,18 +154,24 @@ public final class HTTPClient: @unchecked Sendable {
 
         if isHTTPS {
             // TLS connection
+            print("DEBUG: TLS handshake...", terminator: ""); fflush(stdout)
             let tls = TLSConnection(socket: socket, hostname: host)
             try tls.handshake()
+            print(" done")
             defer { tls.close() }
 
             // Send request
+            print("DEBUG: Sending request...", terminator: ""); fflush(stdout)
             try tls.send(finalRequest.build())
             if let body = finalRequest.body {
                 try tls.send(body)
             }
+            print(" done")
 
             // Read response
+            print("DEBUG: Reading response...", terminator: ""); fflush(stdout)
             response = try readTLSResponse(from: tls)
+            print(" done (\(response.statusCode))")
         } else {
             // Plain HTTP
             try socket.send(finalRequest.build())
@@ -147,10 +196,12 @@ public final class HTTPClient: @unchecked Sendable {
             // Parse redirect URL
             let redirectURL: TUIURL.URL
             if location.hasPrefix("http://") || location.hasPrefix("https://") {
-                guard let url = URLParser.parse(location) else {
+                switch URLParser.parse(location) {
+                case .success(let parsed):
+                    redirectURL = parsed
+                case .failure:
                     throw NetworkError.invalidURL("Invalid redirect URL: \(location)")
                 }
-                redirectURL = url
             } else {
                 // Relative URL
                 redirectURL = TUIURL.URL(

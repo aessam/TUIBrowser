@@ -21,7 +21,10 @@
       "Bash(git add:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd architecture and agent guidelines documentation\n\n- ARCHITECTURE.md: Module dependency graph, responsibilities, data flow\n- docs/INTERFACES.md: Public interface contracts for all modules\n- docs/AGENT_GUIDELINES.md: Rules for AI agents \\(boundaries, TDD, imports\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git commit:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(/tmp/build_final4/arm64-apple-macosx/debug/tuibrowser:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)"
     ]
   }
 }

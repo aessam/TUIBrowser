@@ -5,6 +5,7 @@
 
 import TUICore
 import TUITerminal
+import Darwin
 
 // MARK: - Pixel Buffer
 
@@ -12,7 +13,7 @@ import TUITerminal
 public struct PixelBuffer: Sendable {
     public let width: Int
     public let height: Int
-    public private(set) var pixels: [Color]
+    public var pixels: [Color]
 
     public init(width: Int, height: Int) {
         self.width = width
