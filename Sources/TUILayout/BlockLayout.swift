@@ -128,8 +128,14 @@ public struct BlockLayout: Sendable {
             } else if child.isBlock {
                 BlockLayout().layout(child, containingWidth: box.dimensions.content.width)
             } else if child.boxType == .anonymous {
-                // Anonymous box with inline content - use InlineLayout
-                InlineLayout().layout(child, containingWidth: box.dimensions.content.width)
+                // Anonymous box - check if it has block children
+                if child.hasBlockChildren {
+                    // Anonymous box with block children - use BlockLayout
+                    BlockLayout().layout(child, containingWidth: box.dimensions.content.width)
+                } else {
+                    // Anonymous box with only inline content - use InlineLayout
+                    InlineLayout().layout(child, containingWidth: box.dimensions.content.width)
+                }
             } else {
                 // Single inline element in a block - wrap in anonymous for proper inline layout
                 InlineLayout().layout(child, containingWidth: box.dimensions.content.width)

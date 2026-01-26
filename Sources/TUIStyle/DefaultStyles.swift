@@ -31,6 +31,15 @@ public struct DefaultStyles: Sendable {
         stylesheet.addRule(blockRule(for: "form"))
         stylesheet.addRule(blockRule(for: "fieldset"))
         stylesheet.addRule(blockRule(for: "pre"))
+        stylesheet.addRule(blockRule(for: "center"))  // Deprecated but still used
+        stylesheet.addRule(blockRule(for: "table"))
+        stylesheet.addRule(blockRule(for: "tbody"))
+        stylesheet.addRule(blockRule(for: "thead"))
+        stylesheet.addRule(blockRule(for: "tfoot"))
+        stylesheet.addRule(blockRule(for: "tr"))
+        stylesheet.addRule(blockRule(for: "caption"))
+        stylesheet.addRule(blockRule(for: "colgroup"))
+        stylesheet.addRule(blockRule(for: "col"))
 
         // Headings - block with bold, margins
         stylesheet.addRule(headingRule(for: "h1"))

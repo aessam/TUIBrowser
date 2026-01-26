@@ -74,12 +74,15 @@ public struct FlexLayout: Sendable {
 
     private func measureChildren(_ children: [LayoutBox], isHorizontal: Bool, containerWidth: Int) {
         for child in children {
-            // Determine base size from flex-basis or content
+            // Determine base size from flex-basis, explicit width, or content
             let baseSize: Int
 
             if let flexBasis = child.style.flexBasis, !flexBasis.isAuto {
                 // Use explicit flex-basis
                 baseSize = flexBasis.resolve(against: containerWidth)
+            } else if let explicitWidth = child.style.width, !explicitWidth.isAuto {
+                // Use explicit CSS width (from width property or HTML width attribute)
+                baseSize = explicitWidth.resolve(against: containerWidth)
             } else if child.boxType == .text {
                 // Text nodes get their natural width
                 baseSize = child.textContent?.count ?? 0
@@ -93,6 +96,13 @@ public struct FlexLayout: Sendable {
             if child.boxType == .text {
                 child.dimensions.setContentWidth(min(baseSize, containerWidth))
                 child.dimensions.setContentHeight(1)
+            } else if child.boxType == .inlineBlock {
+                // Inline-block elements: set their width first, then layout
+                let inlineBlockWidth = min(baseSize, containerWidth)
+                child.dimensions.setContentWidth(inlineBlockWidth)
+
+                // Layout children using InlineLayout to get content height
+                InlineLayout().layout(child, containingWidth: inlineBlockWidth)
             } else if child.isBlock {
                 // Block children take full width in column flex, or natural width in row flex
                 if isHorizontal {
@@ -104,6 +114,7 @@ public struct FlexLayout: Sendable {
                 // Recursively layout to get height
                 BlockLayout().layout(child, containingWidth: child.dimensions.content.width)
             } else {
+                // Other inline elements
                 InlineLayout().layout(child, containingWidth: containerWidth)
             }
         }
@@ -145,12 +156,26 @@ public struct FlexLayout: Sendable {
             return text.count
         }
 
+        // For block-level children, take max width
+        // For inline/inline-block children, sum their widths
+        var sumWidth = 0
         var maxWidth = 0
+
         for child in box.children {
             let childWidth = estimateContentWidth(child)
-            maxWidth = max(maxWidth, childWidth)
+            if child.isBlock && child.boxType != .inlineBlock {
+                maxWidth = max(maxWidth, childWidth)
+            } else {
+                // Inline content - sum widths (with 1 char spacing)
+                if sumWidth > 0 {
+                    sumWidth += 1  // Space between inline elements
+                }
+                sumWidth += childWidth
+            }
         }
-        return maxWidth + box.style.padding.horizontal
+
+        // Return whichever is larger plus padding
+        return max(maxWidth, sumWidth) + box.style.padding.horizontal
     }
 
     // MARK: - Wrapping

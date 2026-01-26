@@ -66,17 +66,39 @@ public struct LayoutEngine: Sendable {
         let tagName = element.tagName
         switch tagName {
         case "center":
-            // <center> tag centers its content
+            // <center> tag centers its content and is block-level
+            style.display = .block
             style.textAlign = .center
         case "table", "tbody", "thead", "tfoot":
             // Tables are block-level
             style.display = .block
         case "tr":
-            // Table rows are block-level, children flow horizontally
-            style.display = .block
+            // Table rows use flex to lay out cells horizontally
+            style.display = .flex
+            style.flexDirection = .row
+            style.flexWrap = .nowrap
+            style.gap = 1  // Small gap between cells
         case "td", "th":
             // Table cells are inline-block
             style.display = .inlineBlock
+            // Check for nowrap attribute
+            if element.hasAttribute("nowrap") {
+                style.whiteSpace = .nowrap
+            }
+            // Handle HTML width attribute
+            if let widthAttr = element.getAttribute("width") {
+                if widthAttr.hasSuffix("%") {
+                    if let pct = Double(widthAttr.dropLast()) {
+                        style.width = .percent(pct)
+                    }
+                } else if let px = Int(widthAttr) {
+                    // Pixel value - convert to character cells
+                    style.width = .px(max(1, px / 8))
+                }
+            }
+        case "nobr":
+            // No-break element prevents line wrapping
+            style.whiteSpace = .nowrap
         case "input", "select", "button", "textarea":
             // Form elements are inline-block
             style.display = .inlineBlock
