@@ -127,3 +127,21 @@ public struct Color: Equatable, Hashable, Sendable {
         blend(with: .black, ratio: amount)
     }
 }
+
+// MARK: - CoreGraphics Integration
+
+#if canImport(CoreGraphics)
+import CoreGraphics
+
+extension Color {
+    /// Convert to CGColor for CoreGraphics rendering
+    public var cgColor: CGColor {
+        CGColor(
+            red: CGFloat(r) / 255.0,
+            green: CGFloat(g) / 255.0,
+            blue: CGFloat(b) / 255.0,
+            alpha: CGFloat(a) / 255.0
+        )
+    }
+}
+#endif

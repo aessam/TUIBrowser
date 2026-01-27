@@ -10,6 +10,10 @@ import TUIHTMLParser
 import TUILayout
 import TUIRender
 
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
+
 // MARK: - Command Line Arguments
 
 struct CLIOptions {
@@ -193,33 +197,47 @@ func runMain() async {
                 }
 
                 if let pngPath = options.renderPNG {
-                    // Render to PNG
-                    #if canImport(CoreGraphics) && canImport(ImageIO)
-                    let renderWidth = options.width ?? 240  // Default to 240 columns (Full HD at 8px/char)
-                    let renderHeight = options.height ?? 67  // Default to ~67 rows (1080 at 16px/char)
-                    browser.setTerminalSize(width: renderWidth, height: renderHeight)
+                    // Render to PNG using GraphicalRenderer
+                    #if canImport(CoreGraphics) && canImport(CoreText) && canImport(ImageIO)
+                    // Full HD output: 1920x1080
+                    let pixelWidth = 1920
+                    let pixelHeight = 1080
+
+                    // Calculate layout dimensions based on pixel size
+                    // Each character cell = 16px wide, 20px tall (for readable fonts)
+                    let cellWidth: CGFloat = 16.0
+                    let cellHeight: CGFloat = 20.0
+
+                    let layoutWidth = options.width ?? Int(CGFloat(pixelWidth) / cellWidth)   // ~120 columns
+                    let layoutHeight = options.height ?? Int(CGFloat(pixelHeight) / cellHeight) // ~54 rows
+
+                    browser.setTerminalSize(width: layoutWidth, height: layoutHeight)
 
                     // Re-layout with new size
                     try await browser.navigate(to: url)
 
-                    // Create canvas and render
-                    if let layout = browser.state.layout {
-                        let canvas = Canvas(width: renderWidth, height: renderHeight)
-                        let renderer = Renderer()
-                        renderer.render(layout: layout, to: canvas, scrollY: 0)
+                    // Get layout optimized for PNG (ignores CSS width constraints for full-width content)
+                    if let layout = browser.layoutForPNG() {
+                        let graphicalRenderer = GraphicalRenderer(
+                            cellWidth: cellWidth,
+                            cellHeight: cellHeight,
+                            width: pixelWidth,
+                            height: pixelHeight,
+                            baseFontSize: 16.0,
+                            imageCache: browser.imageCache
+                        )
 
-                        // Render to PNG
-                        let pngRenderer = PNGRenderer()
-                        if pngRenderer.render(canvas, to: pngPath) {
+                        if graphicalRenderer.renderToFile(layout, path: pngPath) {
                             print("Rendered to: \(pngPath)")
-                            print("Image size: \(renderWidth * pngRenderer.cellWidth)x\(renderHeight * pngRenderer.cellHeight) pixels")
+                            print("Image size: \(pixelWidth)x\(pixelHeight) pixels")
+                            print("Layout grid: \(layoutWidth)x\(layoutHeight) cells")
                         } else {
                             print("Error: Failed to render PNG")
                             exit(1)
                         }
                     }
                     #else
-                    print("Error: PNG rendering requires macOS (CoreGraphics)")
+                    print("Error: PNG rendering requires macOS (CoreGraphics/CoreText)")
                     exit(1)
                     #endif
                     return

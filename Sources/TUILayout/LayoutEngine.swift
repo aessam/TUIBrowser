@@ -21,11 +21,13 @@ public struct LayoutEngine: Sendable {
     ///   - document: The DOM document
     ///   - styles: Computed styles for elements
     ///   - width: Available width for layout
+    ///   - ignoreWidthConstraints: When true, ignore CSS width/max-width constraints (useful for PNG rendering)
     /// - Returns: Root layout box
     public func layout(
         document: Document,
         styles: StyleMap,
-        width: Int
+        width: Int,
+        ignoreWidthConstraints: Bool = false
     ) -> LayoutBox {
         // Create root box
         let root = LayoutBox(boxType: .block, style: .block)
@@ -42,7 +44,7 @@ public struct LayoutEngine: Sendable {
         }
 
         // Compute layout
-        computeLayout(root, containingWidth: width)
+        computeLayout(root, containingWidth: width, ignoreWidthConstraints: ignoreWidthConstraints)
 
         return root
     }
@@ -163,14 +165,14 @@ public struct LayoutEngine: Sendable {
     // MARK: - Layout Computation
 
     /// Compute layout for a layout tree
-    private func computeLayout(_ box: LayoutBox, containingWidth: Int) {
+    private func computeLayout(_ box: LayoutBox, containingWidth: Int, ignoreWidthConstraints: Bool = false) {
         box.dimensions.positionAt(x: 0, y: 0)
 
         // Check if this is a flex container
         if box.style.display.isFlex {
-            FlexLayout().layout(box, containingWidth: containingWidth)
+            FlexLayout(ignoreWidthConstraints: ignoreWidthConstraints).layout(box, containingWidth: containingWidth)
         } else if box.isBlock || box.boxType == .anonymous {
-            BlockLayout().layout(box, containingWidth: containingWidth)
+            BlockLayout(ignoreWidthConstraints: ignoreWidthConstraints).layout(box, containingWidth: containingWidth)
         } else {
             InlineLayout().layout(box, containingWidth: containingWidth)
         }
@@ -182,10 +184,11 @@ public struct LayoutEngine: Sendable {
     public static func layout(
         document: Document,
         styles: StyleMap,
-        width: Int
+        width: Int,
+        ignoreWidthConstraints: Bool = false
     ) -> LayoutBox {
         let engine = LayoutEngine()
-        return engine.layout(document: document, styles: styles, width: width)
+        return engine.layout(document: document, styles: styles, width: width, ignoreWidthConstraints: ignoreWidthConstraints)
     }
 }
 

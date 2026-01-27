@@ -8,7 +8,12 @@ import TUIStyle
 /// Block layout algorithm
 public struct BlockLayout: Sendable {
 
-    public init() {}
+    /// When true, ignore CSS width/max-width constraints (useful for PNG rendering)
+    private let ignoreWidthConstraints: Bool
+
+    public init(ignoreWidthConstraints: Bool = false) {
+        self.ignoreWidthConstraints = ignoreWidthConstraints
+    }
 
     // MARK: - Main Layout
 
@@ -33,25 +38,25 @@ public struct BlockLayout: Sendable {
         let style = box.style
 
         // Start with containing width minus margins and padding
-        var availableWidth = containingWidth
+        let availableWidth = containingWidth
             - style.margin.horizontal
             - style.padding.horizontal
 
-        // Apply explicit width if set
+        // Apply explicit width if set (skip in PNG mode)
         var resolvedWidth = availableWidth
-        if let explicitWidth = style.width {
+        if !ignoreWidthConstraints, let explicitWidth = style.width {
             if !explicitWidth.isAuto {
                 resolvedWidth = explicitWidth.resolve(against: containingWidth)
             }
         }
 
-        // Apply max-width constraint
-        if let maxW = style.maxWidth {
+        // Apply max-width constraint (skip in PNG mode)
+        if !ignoreWidthConstraints, let maxW = style.maxWidth {
             let maxResolved = maxW.resolve(against: containingWidth)
             resolvedWidth = min(resolvedWidth, maxResolved)
         }
 
-        // Apply min-width constraint
+        // Apply min-width constraint (still applies for minimum readable width)
         if let minW = style.minWidth {
             let minResolved = minW.resolve(against: containingWidth)
             resolvedWidth = max(resolvedWidth, minResolved)
@@ -137,14 +142,14 @@ public struct BlockLayout: Sendable {
 
             // Layout the child based on its type
             if child.style.display.isFlex {
-                FlexLayout().layout(child, containingWidth: box.dimensions.content.width)
+                FlexLayout(ignoreWidthConstraints: ignoreWidthConstraints).layout(child, containingWidth: box.dimensions.content.width)
             } else if child.isBlock {
-                BlockLayout().layout(child, containingWidth: box.dimensions.content.width)
+                BlockLayout(ignoreWidthConstraints: ignoreWidthConstraints).layout(child, containingWidth: box.dimensions.content.width)
             } else if child.boxType == .anonymous {
                 // Anonymous box - check if it has block children
                 if child.hasBlockChildren {
                     // Anonymous box with block children - use BlockLayout
-                    BlockLayout().layout(child, containingWidth: box.dimensions.content.width)
+                    BlockLayout(ignoreWidthConstraints: ignoreWidthConstraints).layout(child, containingWidth: box.dimensions.content.width)
                 } else {
                     // Anonymous box with only inline content - use InlineLayout
                     InlineLayout().layout(child, containingWidth: box.dimensions.content.width)

@@ -9,7 +9,12 @@ import TUIStyle
 /// Flexbox layout algorithm
 public struct FlexLayout: Sendable {
 
-    public init() {}
+    /// When true, ignore CSS width/max-width constraints (useful for PNG rendering)
+    private let ignoreWidthConstraints: Bool
+
+    public init(ignoreWidthConstraints: Bool = false) {
+        self.ignoreWidthConstraints = ignoreWidthConstraints
+    }
 
     // MARK: - Main Layout
 
@@ -112,7 +117,7 @@ public struct FlexLayout: Sendable {
                 }
 
                 // Recursively layout to get height
-                BlockLayout().layout(child, containingWidth: child.dimensions.content.width)
+                BlockLayout(ignoreWidthConstraints: ignoreWidthConstraints).layout(child, containingWidth: child.dimensions.content.width)
             } else {
                 // Other inline elements
                 InlineLayout().layout(child, containingWidth: containerWidth)

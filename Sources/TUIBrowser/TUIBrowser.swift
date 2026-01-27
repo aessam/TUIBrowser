@@ -504,6 +504,26 @@ public final class Browser {
         state.scrollY = max(0, layout.dimensions.content.height - terminalHeight + 2)
     }
 
+    // MARK: - PNG Layout
+
+    /// Get layout optimized for PNG rendering (ignores CSS width constraints)
+    /// - Returns: Layout box with full-width content, or nil if no document loaded
+    public func layoutForPNG() -> LayoutBox? {
+        guard let document = state.document, let styles = state.styles else {
+            return nil
+        }
+
+        // Re-run layout with ignoreWidthConstraints: true
+        // This allows content to fill the full available width instead of
+        // respecting CSS max-width constraints
+        return LayoutEngine.layout(
+            document: document,
+            styles: styles,
+            width: terminalWidth,
+            ignoreWidthConstraints: true
+        )
+    }
+
     // MARK: - Rendering
 
     /// Render current page to a canvas
