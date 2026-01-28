@@ -69,7 +69,14 @@ public struct BlockLayout: Sendable {
         // Set dimensions
         box.dimensions.margin = style.margin
         box.dimensions.padding = style.padding
-        box.dimensions.setContentWidth(max(0, resolvedWidth))
+        var contentWidth = max(0, resolvedWidth)
+
+        // If border-box sizing, the resolved width includes padding; subtract to get content width
+        if style.boxSizing == .borderBox {
+            contentWidth = max(0, resolvedWidth - style.padding.horizontal)
+        }
+
+        box.dimensions.setContentWidth(contentWidth)
 
         // Update content position to account for padding
         // The content area should be offset by padding from the box origin

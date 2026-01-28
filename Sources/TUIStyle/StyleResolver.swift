@@ -13,6 +13,7 @@ public typealias StyleMap = [ObjectIdentifier: ComputedStyle]
 public struct StyleResolver: Sendable {
     private let cascadeEngine: CascadeEngine
     private let defaultStyles: Stylesheet
+    private let maxElements: Int = 6000  // safety cap to avoid pathological trees
 
     public init(defaultStyles: Stylesheet? = nil) {
         self.cascadeEngine = CascadeEngine()
@@ -28,7 +29,8 @@ public struct StyleResolver: Sendable {
     /// - Returns: Map from element ObjectIdentifier to ComputedStyle
     public func resolve(
         document: Document,
-        stylesheets: [Stylesheet]
+        stylesheets: [Stylesheet],
+        skipInlineStyles: Bool = false
     ) -> StyleMap {
         var styleMap = StyleMap()
 
@@ -36,8 +38,22 @@ public struct StyleResolver: Sendable {
             return styleMap
         }
 
+        // Inline style parsing budget (characters) and element count to prevent runaway work
+        var inlineStyleCharBudget = 20_000
+        var inlineStyleElementBudget = 2_000
+
         // Resolve styles recursively from root
-        resolveRecursive(element: root, parentStyle: nil, stylesheets: stylesheets, styleMap: &styleMap)
+        var processed = 0
+        resolveRecursive(
+            element: root,
+            parentStyle: nil,
+            stylesheets: stylesheets,
+            styleMap: &styleMap,
+            processed: &processed,
+            skipInlineStyles: skipInlineStyles,
+            inlineCharBudget: &inlineStyleCharBudget,
+            inlineElementBudget: &inlineStyleElementBudget
+        )
 
         return styleMap
     }
@@ -51,14 +67,46 @@ public struct StyleResolver: Sendable {
     public func resolveElement(
         _ element: Element,
         parentStyle: ComputedStyle?,
-        stylesheets: [Stylesheet]
+        stylesheets: [Stylesheet],
+        skipInline: Bool = false,
+        inlineCharBudget: inout Int,
+        inlineElementBudget: inout Int
     ) -> ComputedStyle {
         // Collect matching rules
-        let matchedRules = cascadeEngine.collectMatchingRules(
+        var matchedRules = cascadeEngine.collectMatchingRules(
             for: element,
             from: stylesheets,
             defaultStyles: defaultStyles
         )
+
+        // Inline styles (style="" attribute) have the highest author priority
+        if !skipInline,
+           inlineElementBudget > 0,
+           let inlineStyle = element.getAttribute("style"),
+           !inlineStyle.isEmpty {
+
+            var cappedInline = inlineStyle
+            if cappedInline.count > inlineCharBudget {
+                cappedInline = String(cappedInline.prefix(max(0, inlineCharBudget)))
+            }
+            // Update budgets
+            inlineCharBudget = max(0, inlineCharBudget - cappedInline.count)
+            inlineElementBudget -= 1
+
+            // Hard cap inline style length to avoid pathological parsing
+            let inlineDeclarations = CSSParser.parseDeclarations(cappedInline)
+            if !inlineDeclarations.isEmpty {
+                // Give inline styles a very high specificity so they win over ID selectors
+                let inlineSpecificity = Specificity(a: 1000, b: 0, c: 0)
+                matchedRules.append(
+                    MatchedRule(
+                        declarations: inlineDeclarations,
+                        specificity: inlineSpecificity,
+                        sourceOrder: Int.max
+                    )
+                )
+            }
+        }
 
         // Apply cascade
         var cascadedValues = cascadeEngine.cascade(matchedRules: matchedRules)
@@ -83,14 +131,30 @@ public struct StyleResolver: Sendable {
         element: Element,
         parentStyle: ComputedStyle?,
         stylesheets: [Stylesheet],
-        styleMap: inout StyleMap
+        styleMap: inout StyleMap,
+        processed: inout Int,
+        skipInlineStyles: Bool,
+        inlineCharBudget: inout Int,
+        inlineElementBudget: inout Int
     ) {
+        guard processed < maxElements else { return }
+
         // Resolve this element's style
-        let style = resolveElement(element, parentStyle: parentStyle, stylesheets: stylesheets)
+        let style = resolveElement(
+            element,
+            parentStyle: parentStyle,
+            stylesheets: stylesheets,
+            skipInline: skipInlineStyles,
+            inlineCharBudget: &inlineCharBudget,
+            inlineElementBudget: &inlineElementBudget
+        )
 
         // Store in map using ObjectIdentifier
         let id = ObjectIdentifier(element)
         styleMap[id] = style
+
+        processed += 1
+        if processed >= maxElements { return }
 
         // Recursively resolve children
         for child in element.children {
@@ -98,7 +162,11 @@ public struct StyleResolver: Sendable {
                 element: child,
                 parentStyle: style,
                 stylesheets: stylesheets,
-                styleMap: &styleMap
+                styleMap: &styleMap,
+                processed: &processed,
+                skipInlineStyles: skipInlineStyles,
+                inlineCharBudget: &inlineCharBudget,
+                inlineElementBudget: &inlineElementBudget
             )
         }
     }
@@ -137,9 +205,14 @@ extension StyleResolver {
     public static func resolve(
         document: Document,
         stylesheets: [Stylesheet],
-        defaultStyles: Stylesheet = DefaultStyles.create()
+        defaultStyles: Stylesheet = DefaultStyles.create(),
+        skipInlineStyles: Bool = false
     ) -> StyleMap {
         let resolver = StyleResolver(defaultStyles: defaultStyles)
-        return resolver.resolve(document: document, stylesheets: stylesheets)
+        return resolver.resolve(
+            document: document,
+            stylesheets: stylesheets,
+            skipInlineStyles: skipInlineStyles
+        )
     }
 }

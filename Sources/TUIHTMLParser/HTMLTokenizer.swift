@@ -2,6 +2,7 @@
 // State machine tokenizer following simplified WHATWG spec
 
 import TUICore
+import Foundation
 
 /// HTML Tokenizer state machine
 public final class HTMLTokenizer: @unchecked Sendable {
@@ -76,15 +77,31 @@ public final class HTMLTokenizer: @unchecked Sendable {
         state = .data
         characterBuffer = ""
 
-        while position < input.count {
+        var iterations = 0
+        // Keep the tokenizer from spinning forever on malformed input.
+        // Cap work to a reasonable multiple of input size.
+        let iterationLimit = min(1_000_000, max(200_000, input.count * 5))
+        let deadline = Date().addingTimeInterval(2.0) // hard wall-clock cap
+
+        while position < input.count && iterations < iterationLimit {
+            if Date() >= deadline {
+                break
+            }
+            let before = position
+            let stateBefore = state
+
             processState()
+
+            // Safety guard: only force progress if neither the state nor position changed
+            if position == before && state == stateBefore {
+                position += 1
+            }
+
+            iterations += 1
         }
 
-        // Process any remaining state at EOF
-        if state != .data {
-            // Force transition to data state for EOF handling
-            state = .data
-        }
+        // If we bailed due to iteration limit, ensure we still emit what we have
+        state = .data
 
         flushCharacterBuffer()
         tokens.append(.eof)

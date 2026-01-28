@@ -8,6 +8,8 @@ import TUIStyle
 /// Inline layout algorithm
 public struct InlineLayout: Sendable {
 
+    private let textLayout = TextLayout()
+
     public init() {}
 
     // MARK: - Main Layout
@@ -108,7 +110,14 @@ public struct InlineLayout: Sendable {
                 let words = splitIntoWords(text)
 
                 for (wordIndex, word) in words.enumerated() {
-                    let wordWidth = word.count
+                    // Explicit newline forces a new line
+                    if word == "\n" {
+                        lines.append(currentLine)
+                        currentLine = Line()
+                        continue
+                    }
+
+                    let wordWidth = textLayout.measureWidth(word)
 
                     if currentLine.width + wordWidth > maxWidth && currentLine.width > 0 {
                         // Line is full, start new line
@@ -189,7 +198,7 @@ public struct InlineLayout: Sendable {
     /// Calculate width of an inline box
     private func calculateInlineWidth(_ box: LayoutBox) -> Int {
         if let text = box.textContent {
-            return text.count
+            return textLayout.measureWidth(text)
         }
 
         // Check for special elements with intrinsic sizes
@@ -202,7 +211,7 @@ public struct InlineLayout: Sendable {
                     return 1  // Single character
                 case "submit", "button", "reset":
                     let value = element.getAttribute("value") ?? inputType.capitalized
-                    return value.count + 4  // "┃ text ┃"
+                    return textLayout.measureWidth(value) + 4  // "┃ text ┃"
                 case "hidden":
                     return 0
                 default:
@@ -212,7 +221,7 @@ public struct InlineLayout: Sendable {
                 }
             case "button":
                 let text = element.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
-                return max(text.count + 4, 8)  // Minimum 8 chars
+                return max(textLayout.measureWidth(text) + 4, 8)  // Minimum 8 chars
             case "select":
                 return 15  // Default dropdown width
             case "textarea":
@@ -245,7 +254,7 @@ public struct InlineLayout: Sendable {
             var textWidth = 0
             box.traverse { descendant in
                 if let text = descendant.textContent {
-                    textWidth += text.count
+                    textWidth += textLayout.measureWidth(text)
                 }
             }
             width = max(width, textWidth + box.style.padding.horizontal)

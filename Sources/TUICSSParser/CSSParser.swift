@@ -1,6 +1,7 @@
 // TUICSSParser - High-level CSS Parser API
 
 import TUICore
+import Foundation
 
 /// High-level CSS parser providing static methods for parsing CSS
 public struct CSSParser: Sendable {
@@ -74,7 +75,15 @@ private struct CSSParserImpl {
 
         skipWhitespace()
 
-        while !isAtEnd {
+        var iterations = 0
+        // Prevent runaway parsing on pathological CSS: cap work to 5x tokens, max 500k steps.
+        let iterationLimit = min(500_000, max(100_000, tokens.count * 5))
+        let deadline = Date().addingTimeInterval(1.5) // wall-clock cap
+
+        while !isAtEnd && iterations < iterationLimit {
+            if Date() >= deadline {
+                break
+            }
             let startIndex = index  // Track position before parsing
 
             if let rule = parseRule() {
@@ -87,6 +96,7 @@ private struct CSSParserImpl {
             }
 
             skipWhitespace()
+            iterations += 1
         }
 
         return Stylesheet(rules: rules)

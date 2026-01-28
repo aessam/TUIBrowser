@@ -9,9 +9,11 @@ import TUIStyle
 /// Main layout engine
 public struct LayoutEngine: Sendable {
     private let textLayout: TextLayout
+    private let maxNodes: Int
 
-    public init() {
+    public init(maxNodes: Int = 8000) {
         self.textLayout = TextLayout()
+        self.maxNodes = maxNodes
     }
 
     // MARK: - Main Layout API
@@ -34,9 +36,10 @@ public struct LayoutEngine: Sendable {
         root.dimensions.setContentWidth(width)
 
         // Build layout tree from document body (or root)
+        var nodeCount = 0
         if let body = document.body ?? document.documentElement {
             let bodyStyle = StyleResolver.getStyle(for: body, from: styles)
-            let bodyBox = buildLayoutTree(for: body, styles: styles, parentStyle: bodyStyle)
+            let bodyBox = buildLayoutTree(for: body, styles: styles, parentStyle: bodyStyle, nodeCount: &nodeCount)
 
             if let bodyBox = bodyBox {
                 root.appendChild(bodyBox)
@@ -55,8 +58,11 @@ public struct LayoutEngine: Sendable {
     private func buildLayoutTree(
         for element: Element,
         styles: StyleMap,
-        parentStyle: ComputedStyle
+        parentStyle: ComputedStyle,
+        nodeCount: inout Int
     ) -> LayoutBox? {
+        guard nodeCount < maxNodes else { return nil }
+
         var style = StyleResolver.getStyle(for: element, from: styles)
 
         // Skip hidden elements
@@ -127,6 +133,8 @@ public struct LayoutEngine: Sendable {
         }
 
         let box = LayoutBox(boxType: boxType, style: style, element: element)
+        nodeCount += 1
+        if nodeCount >= maxNodes { return box }
 
         // Handle list items
         if style.display == .listItem {
@@ -138,7 +146,7 @@ public struct LayoutEngine: Sendable {
         for child in element.childNodes {
             if let childElement = child as? Element {
                 // Recurse for element children
-                if let childBox = buildLayoutTree(for: childElement, styles: styles, parentStyle: style) {
+                if let childBox = buildLayoutTree(for: childElement, styles: styles, parentStyle: style, nodeCount: &nodeCount) {
                     // Set list index for list items
                     if childBox.style.display == .listItem {
                         childBox.layoutInfo.listIndex = listIndex
@@ -153,6 +161,8 @@ public struct LayoutEngine: Sendable {
                 // Create text box for text nodes
                 let text = textNode.data
                 if !text.allSatisfy({ $0.isWhitespace }) || style.whiteSpace == .pre {
+                    nodeCount += 1
+                    if nodeCount > maxNodes { break }
                     let textBox = LayoutBox.text(text, style: style)
                     box.appendChild(textBox)
                 }

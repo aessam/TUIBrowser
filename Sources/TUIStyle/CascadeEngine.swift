@@ -73,6 +73,7 @@ public struct CascadeEngine: Sendable {
     ) -> [MatchedRule] {
         var rules: [MatchedRule] = []
         var sourceOrder = 0
+        let ruleLimit = 2_000  // cap total matched rules to prevent pathological blowups
 
         // Add user agent (default) styles
         for rule in defaultStyles.rules {
@@ -84,6 +85,7 @@ public struct CascadeEngine: Sendable {
                         sourceOrder: sourceOrder
                     ))
                     sourceOrder += 1
+                    if rules.count >= ruleLimit { return rules }
                     break  // Only add rule once per element
                 }
             }
@@ -100,6 +102,7 @@ public struct CascadeEngine: Sendable {
                             sourceOrder: sourceOrder
                         ))
                         sourceOrder += 1
+                        if rules.count >= ruleLimit { return rules }
                         break
                     }
                 }
@@ -315,11 +318,6 @@ public struct CascadeEngine: Sendable {
                 style.margin = EdgeInsets(top: px, right: style.margin.right, bottom: style.margin.bottom, left: style.margin.left)
             }
 
-        case "margin-right":
-            if let px = resolveLength(value) {
-                style.margin = EdgeInsets(top: style.margin.top, right: px, bottom: style.margin.bottom, left: style.margin.left)
-            }
-
         case "margin-bottom":
             if let px = resolveLength(value) {
                 style.margin = EdgeInsets(top: style.margin.top, right: style.margin.right, bottom: px, left: style.margin.left)
@@ -364,6 +362,12 @@ public struct CascadeEngine: Sendable {
         case "padding-left":
             if let px = resolveLength(value) {
                 style.padding = EdgeInsets(top: style.padding.top, right: style.padding.right, bottom: style.padding.bottom, left: px)
+            }
+
+        case "box-sizing":
+            if let keyword = value.keywordValue,
+               let bs = ComputedStyle.BoxSizing(keyword: keyword) {
+                style.boxSizing = bs
             }
 
         // Width/Height sizing

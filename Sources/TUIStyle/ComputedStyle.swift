@@ -336,6 +336,19 @@ public enum ListStyleType: String, Equatable, Hashable, Sendable {
 
 /// Fully resolved style for a DOM element
 public struct ComputedStyle: Equatable, Sendable {
+    public enum BoxSizing: String, Sendable {
+        case contentBox = "content-box"
+        case borderBox  = "border-box"
+
+        public init?(keyword: String) {
+            switch keyword.lowercased() {
+            case "content-box": self = .contentBox
+            case "border-box": self = .borderBox
+            default: return nil
+            }
+        }
+    }
+
     // Display
     public var display: Display
 
@@ -383,6 +396,9 @@ public struct ComputedStyle: Equatable, Sendable {
     public var marginLeftAuto: Bool = false
     public var marginRightAuto: Bool = false
 
+    // Box sizing
+    public var boxSizing: BoxSizing = .contentBox
+
     // MARK: - Initialization
 
     public init(
@@ -409,7 +425,8 @@ public struct ComputedStyle: Equatable, Sendable {
         minHeight: CSSLength? = nil,
         maxHeight: CSSLength? = nil,
         marginLeftAuto: Bool = false,
-        marginRightAuto: Bool = false
+        marginRightAuto: Bool = false,
+        boxSizing: BoxSizing = .contentBox
     ) {
         self.display = display
         self.color = color
@@ -435,6 +452,7 @@ public struct ComputedStyle: Equatable, Sendable {
         self.maxHeight = maxHeight
         self.marginLeftAuto = marginLeftAuto
         self.marginRightAuto = marginRightAuto
+        self.boxSizing = boxSizing
     }
 
     // MARK: - Default Styles

@@ -286,7 +286,14 @@ public final class Browser {
         }
 
         // Get HTML content
-        let html = response.bodyString ?? ""
+        var html = response.bodyString ?? ""
+
+        // Protect against extremely large pages that could stall tokenization/layout
+        let maxHTMLCharacters = 500_000
+        if html.count > maxHTMLCharacters {
+            html = String(html.prefix(maxHTMLCharacters))
+            state.statusMessage = "Truncated large document"
+        }
 
         // Parse HTML
         let document = HTMLParser.parse(html)
@@ -300,12 +307,50 @@ public final class Browser {
                 let stylesheet = CSSParser.parseStylesheet(cssText)
                 stylesheets.append(stylesheet)
             }
+
+            // External stylesheets: <link rel="stylesheet" href="...">
+            let linkElements = document.getElementsByTagName("link")
+            for link in linkElements {
+                guard let rel = link.getAttribute("rel")?.lowercased(),
+                      rel.split(separator: " ").contains("stylesheet"),
+                      let href = link.getAttribute("href"),
+                      !href.isEmpty else {
+                    continue
+                }
+
+                // Resolve href against current page URL
+                guard let cssURLString = resolveResourceURL(href, baseURL: url),
+                      case .success(let cssURL) = URLParser.parse(cssURLString),
+                      cssURL.scheme == "http" || cssURL.scheme == "https" else {
+                    continue
+                }
+
+                do {
+                    let cssResponse = try await httpClient.fetchWithURLSession(url: cssURL)
+                    guard cssResponse.statusCode >= 200 && cssResponse.statusCode < 300,
+                          let cssTextRaw = cssResponse.bodyString else {
+                        continue
+                    }
+                    // Cap per-stylesheet size to avoid pathological parsing time
+                    let maxCSSCharacters = 200_000
+                    let cssText = cssTextRaw.count > maxCSSCharacters
+                        ? String(cssTextRaw.prefix(maxCSSCharacters))
+                        : cssTextRaw
+
+                    let stylesheet = CSSParser.parseStylesheet(cssText)
+                    stylesheets.append(stylesheet)
+                } catch {
+                    // Ignore stylesheet load failures to keep navigation resilient
+                    continue
+                }
+            }
         }
 
         // Resolve styles
         let styles = StyleResolver.resolve(
             document: document,
-            stylesheets: stylesheets
+            stylesheets: stylesheets,
+            skipInlineStyles: false
         )
 
         // Build layout
@@ -1403,5 +1448,46 @@ extension Browser {
             port = ":\(p)"
         }
         return "\(currentURL.scheme)://\(currentURL.host ?? "")\(port)\(basePath)/\(href)"
+    }
+}
+
+// MARK: - Resource URL Resolution
+
+private extension Browser {
+    /// Resolve a resource URL (CSS, scripts, etc.) relative to a base URL
+    func resolveResourceURL(_ href: String, baseURL: TUIURL.URL) -> String? {
+        // Handle absolute URLs
+        if href.hasPrefix("http://") || href.hasPrefix("https://") {
+            return href
+        }
+
+        // Protocol-relative URLs
+        if href.hasPrefix("//") {
+            return "\(baseURL.scheme):\(href)"
+        }
+
+        // Absolute paths
+        if href.hasPrefix("/") {
+            var port = ""
+            if let p = baseURL.port {
+                port = ":\(p)"
+            }
+            return "\(baseURL.scheme)://\(baseURL.host ?? "")\(port)\(href)"
+        }
+
+        // Relative paths
+        var basePath = baseURL.path
+        if !basePath.hasSuffix("/") {
+            basePath = (basePath as NSString).deletingLastPathComponent
+        }
+        if basePath.isEmpty { basePath = "/" }
+
+        var port = ""
+        if let p = baseURL.port {
+            port = ":\(p)"
+        }
+
+        let fullPath = basePath.hasSuffix("/") ? "\(basePath)\(href)" : "\(basePath)/\(href)"
+        return "\(baseURL.scheme)://\(baseURL.host ?? "")\(port)\(fullPath)"
     }
 }

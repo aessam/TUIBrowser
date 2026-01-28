@@ -4,6 +4,8 @@
 // Bridges between the JavaScript interpreter and the HTML DOM tree.
 
 import Foundation
+
+#if canImport(TUIHTMLParser)
 import TUIHTMLParser
 
 // MARK: - DOM Bindings
@@ -504,3 +506,17 @@ public struct DOMBindings {
     }
 }
 
+#else
+
+// Fallback stub so TUIJSEngine can build without HTML parser dependency
+public struct DOMBindings {
+    public static func install(into interpreter: Interpreter, document: Any) {
+        // DOM not available in this build configuration
+    }
+
+    public static func wrapElement(_ element: Any, interpreter: Interpreter) -> JSValue {
+        return .null
+    }
+}
+
+#endif

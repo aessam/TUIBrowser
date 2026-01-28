@@ -38,6 +38,11 @@ public final class LayoutBox {
     /// Additional layout information
     public var layoutInfo: LayoutInfo
 
+    /// Border widths (CSS border not rendered but used for sizing when border-box)
+    public var borderInsets: EdgeInsets {
+        .zero // borders not modeled yet
+    }
+
     // MARK: - Initialization
 
     public init(

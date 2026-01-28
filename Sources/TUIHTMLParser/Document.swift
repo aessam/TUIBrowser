@@ -182,4 +182,19 @@ public final class Document: BaseNode {
         get { "" }
         set { /* Documents don't have text content */ }
     }
+
+    /// Count elements up to a limit to avoid expensive full traversals
+    public func countElements(limit: Int) -> Int {
+        var count = 0
+        var stack: [Node] = childNodes
+
+        while let node = stack.popLast() {
+            if let element = node as? Element {
+                count += 1
+                if count >= limit { return count }
+                stack.append(contentsOf: element.childNodes)
+            }
+        }
+        return count
+    }
 }
