@@ -290,8 +290,8 @@ public struct Renderer: Sendable {
         // Create renderer with options
         let imageRenderer = ImageRenderer(options: imageOptions)
 
-        // Render using half-block blitter for best quality
-        let blitResult = imageRenderer.renderColorHalfBlock(scaledPixels)
+        // Render using configured blitter
+        let blitResult = imageRenderer.render(scaledPixels)
 
         // Draw blitted cells to canvas
         for (rowIndex, row) in blitResult.cells.enumerated() {

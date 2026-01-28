@@ -68,6 +68,9 @@ public enum CSSValue: Equatable, Hashable, Sendable {
     /// The unset keyword
     case unset
 
+    /// A list of values (e.g. "10px 20px" or "Arial, sans-serif")
+    case list([CSSValue])
+
     /// Check if this value is a keyword with the given name
     public func isKeyword(_ name: String) -> Bool {
         if case .keyword(let value) = self {
@@ -124,6 +127,8 @@ extension CSSValue: CustomStringConvertible {
             return "initial"
         case .unset:
             return "unset"
+        case .list(let values):
+            return values.map { $0.description }.joined(separator: " ")
         }
     }
 }

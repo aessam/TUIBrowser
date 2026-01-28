@@ -362,6 +362,35 @@ private struct CSSParserImpl {
     }
 
     private mutating func parseValue() -> CSSValue? {
+        var values: [CSSValue] = []
+
+        while !isAtEnd {
+            // Check for terminators
+            if case .semicolon = currentToken { break }
+            if case .rightBrace = currentToken { break }
+            if case .delim("!") = currentToken { break }
+
+            if let val = parseComponentValue() {
+                values.append(val)
+            } else {
+                break
+            }
+
+            skipWhitespace()
+
+            // Handle commas in value lists (e.g. font-family)
+            if case .comma = currentToken {
+                advance()
+                skipWhitespace()
+            }
+        }
+
+        if values.isEmpty { return nil }
+        if values.count == 1 { return values[0] }
+        return .list(values)
+    }
+
+    private mutating func parseComponentValue() -> CSSValue? {
         skipWhitespace()
 
         switch currentToken {
